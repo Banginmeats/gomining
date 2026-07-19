@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GoMining Daily Action Dashboard v6.1</title>
+<style>
+:root{--navy:#17365d;--blue:#1f4e78;--green:#3c7a2b;--orange:#b75a12;--red:#b42318;--muted:#667085;--bg:#f4f6f9}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color:#17202a}
+header{background:var(--navy);color:#fff;padding:20px}header h1{margin:0;font-size:25px}header p{margin:6px 0 0;opacity:.86}
+main{max-width:1180px;margin:auto;padding:14px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:13px}
+.card{background:#fff;border-radius:14px;padding:16px;box-shadow:0 2px 9px rgba(0,0,0,.07)}.s4{grid-column:span 4}.s6{grid-column:span 6}.s8{grid-column:span 8}.s12{grid-column:span 12}
+h2{margin:0 0 12px;color:var(--navy);font-size:18px}.action{border-left:8px solid var(--green)}.fiat{border-left-color:var(--orange)}
+.kicker{font-size:12px;color:var(--muted);text-transform:uppercase;font-weight:800;letter-spacing:.06em}.big{font-size:30px;font-weight:850;margin-top:8px}.why{font-size:13px;color:var(--muted);line-height:1.45;margin-top:8px}
+.inputs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}label{display:block;font-size:12px;color:#475467;margin-bottom:4px}
+input{width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:7px;background:#fff8d6;font-size:15px}.live input{background:#e8f2ff;color:#0645ad;font-weight:750}
+button{border:0;border-radius:8px;padding:10px 14px;background:var(--blue);color:#fff;font-weight:750}.muted{font-size:12px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;border-bottom:1px solid #e5e7eb;text-align:left}th{background:#edf2f7}.num{text-align:right;font-variant-numeric:tabular-nums}.winner{background:#e9f5e4}
+.ok{color:var(--green);font-weight:800}.bad{color:var(--red);font-weight:800}.pill{display:inline-block;padding:3px 8px;border-radius:999px;background:#eef2f6;font-size:11px}
+@media(max-width:800px){.s4,.s6,.s8{grid-column:span 12}.inputs{grid-template-columns:1fr 1fr}}
+@media(max-width:500px){.inputs{grid-template-columns:1fr}main{padding:9px}.big{font-size:26px}}
+.conf-high{color:var(--green);font-weight:800}.conf-med{color:#9a6700;font-weight:800}.conf-low{color:var(--red);font-weight:800}</style></head>
+<body>
+<header><h1>GoMining Daily Action Dashboard v6.1</h1><p>Daily decisions, switch thresholds, and a transparent breakdown of why each reward option wins or loses.</p></header>
+<main><div class="grid">
+
+<section class="card s4"><h2>Live market prices</h2><div class="inputs live">
+<div><label>BTC price ($)</label><input id="btc" type="number" step=".01"></div>
+<div><label>GOMINING price ($)</label><input id="gmt" type="number" step=".000001"></div>
+<div><label>Last refresh</label><div id="updated" style="padding-top:10px">—</div></div>
+</div><br><button onclick="refreshPrices()">Refresh prices</button> <span id="priceStatus" class="muted"></span></section>
+
+<section class="card s4 action"><div class="kicker">Tomorrow’s reward</div><div id="rewardAction" class="big">CALCULATING</div><div id="rewardWhy" class="why"></div><div id="rewardConfidence" class="why"></div></section>
+<section class="card s4 action fiat"><div class="kicker">Fiat available today</div><div id="fiatAction" class="big">CALCULATING</div><div id="fiatWhy" class="why"></div><div id="fiatConfidence" class="why"></div></section>
+
+<section class="card s8"><h2>Current miner snapshot <span id="calibration" class="pill">validating</span></h2>
+<div class="inputs">
+<div><label>Hashrate (TH)</label><input id="hash" value="1029.33" type="number" step=".01"></div>
+<div><label>Efficiency (W/TH)</label><input id="eff" value="15" type="number" step=".1"></div>
+<div><label>Pool reward (BTC/day)</label><input id="pool" value="0.00050864" type="number" step=".00000001"></div>
+<div><label>Electricity shown (BTC/day)</label><input id="electricity" value="0.00026851" type="number" step=".00000001"></div>
+<div><label>Service shown (BTC/day)</label><input id="service" value="0.00013276" type="number" step=".00000001"></div>
+<div><label>Net reward shown (BTC/day)</label><input id="net" value="0.00010738" type="number" step=".00000001"></div>
+<div><label>Current total discount (%)</label><input id="discount" value="6.19" type="number" step=".01"></div>
+<div><label>Wallet GOMINING</label><input id="wallet" value="0" type="number" step="1"></div>
+<div><label>Locked GOMINING</label><input id="locked" value="0" type="number" step="1"></div>
+</div></section>
+
+<section class="card s4"><h2>Prices and strategy settings</h2><div class="inputs">
+<div><label>Fiat amount ($)</label><input id="fiat" value="1000" type="number" step="50"></div>
+<div><label>Reward TH price ($/TH)</label><input id="rewardTH" value="11.90" type="number" step=".01"></div>
+<div><label>Cash TH price ($/TH)</label><input id="cashTH" value="11.90" type="number" step=".01"></div>
+<div><label>14 W upgrade ($/TH)</label><input id="u14" value="2.75" type="number" step=".01"></div>
+<div><label>13 W upgrade ($/TH)</label><input id="u13" value="5.50" type="number" step=".01"></div>
+<div><label>12 W upgrade ($/TH)</label><input id="u12" value="8.25" type="number" step=".01"></div>
+<div><label>Reinvest bonus (%)</label><input id="bonus" value="5" type="number" step=".1"></div>
+<div><label>Lock APR (%)</label><input id="apr" value="20.65" type="number" step=".01"></div>
+<div><label>Lock duration (years)</label><input id="lockYears" value="4" type="number" step=".25"></div>
+<div><label>Model horizon (years)</label><input id="years" value="10" type="number" step="1"></div>
+<div><label>Hashprice decline (%/month)</label><input id="decline" value="1" type="number" step=".1"></div>
+<div><label>BTC growth (%/year)</label><input id="btcGrowth" value="15" type="number" step="1"></div>
+<div><label>GOMINING growth (%/year)</label><input id="gmtGrowth" value="0" type="number" step="1"></div>
+<div><label>TH residual value (% of cost)</label><input id="thResidual" value="35" type="number" step="5"></div>
+<div><label>Minimum edge to act (%)</label><input id="threshold" value="5" type="number" step=".5"></div>
+</div><br><button onclick="calculate()">Recalculate</button></section>
+
+<section class="card s6"><h2>Reward decision detail</h2>
+<table><thead><tr><th>Rank</th><th>Tomorrow’s reward goes to</th><th class="num">10-year BTC-equivalent</th><th class="num">Score</th></tr></thead><tbody id="rewardRows"></tbody></table></section>
+
+<section class="card s6"><h2>Fiat decision detail</h2>
+<table><thead><tr><th>Rank</th><th>Use fiat for</th><th class="num">10-year BTC-equivalent</th><th>Executable now?</th></tr></thead><tbody id="fiatRows"></tbody></table></section>
+
+<section class="card s12"><h2>Scenario results</h2><table><thead><tr><th>Scenario</th><th>Reward winner</th><th>Fiat winner</th></tr></thead><tbody id="scenarioRows"></tbody></table></section>
+
+
+<section class="card s12"><h2>Why is the reward winner ahead?</h2>
+<div id="breakdownSummary" class="why" style="margin-bottom:12px"></div>
+<table>
+<thead><tr><th>Value component</th><th class="num">TH reinvestment</th><th class="num">GOMINING lock</th><th>What it means</th></tr></thead>
+<tbody id="breakdownRows"></tbody>
+<tfoot><tr><th>Total modeled value</th><th class="num" id="thTotal">—</th><th class="num" id="lockTotal">—</th><th id="breakdownGap">—</th></tr></tfoot>
+</table>
+<div class="muted" style="margin-top:10px">All values are shown as projected BTC-equivalent over the selected model horizon. This is not a price forecast; it is a transparent display of the assumptions currently driving the recommendation.</div>
+</section>
+
+<section class="card s12"><h2>What would make GOMINING Lock win tomorrow?</h2>
+<div id="switchSummary" class="why" style="margin-bottom:12px"></div>
+<table><thead><tr><th>Variable</th><th>Current</th><th>Switch point</th><th>Change required</th></tr></thead>
+<tbody id="switchRows"></tbody></table>
+<div class="muted" style="margin-top:10px">Each threshold changes one variable at a time while holding all other settings constant. “No switch” means GOMINING Lock did not become the top reward choice anywhere within the tested range.</div>
+</section>
+
+<section class="card s12 muted">
+The dashboard uses your actual GoMining daily pool reward, electricity, service, net reward, and current discount. It first checks that pool reward minus electricity and service reproduces the app’s net reward. It then compares BTC, TH, GOMINING wallet, GOMINING lock, and efficiency upgrades in BTC-equivalent terms. Assumptions remain editable because future BTC price, token price, hashprice, and resale values cannot be known.
+</section>
+
+</div></main>
+<script>
+const ids=["btc","gmt","hash","eff","pool","electricity","service","net","discount","wallet","locked","fiat","rewardTH","cashTH","u14","u13","u12","bonus","apr","lockYears","years","decline","btcGrowth","gmtGrowth","thResidual","threshold"];
+const E=id=>document.getElementById(id),N=id=>Number(E(id).value)||0;
+const btcFmt=x=>isFinite(x)?x.toFixed(8):"—", pct=x=>(100*x).toFixed(1)+"%";
+function save(){let o={};ids.forEach(id=>o[id]=E(id).value);localStorage.setItem("gomining-daily-v3",JSON.stringify(o))}
+function load(){
+ try{
+  let o=JSON.parse(localStorage.getItem("gomining-daily-v3")||"{}");
+  ids.forEach(id=>{if(o[id]!==undefined && o[id]!=="")E(id).value=o[id]});
+ }catch(e){}
+ if(!N("btc"))E("btc").value="118000";
+ if(!N("gmt"))E("gmt").value="0.2865";
+}
+ids.forEach(id=>E(id).addEventListener("change",()=>{save();calculate()}));
+
+async function refreshPrices(){
+ E("priceStatus").textContent="Refreshing…";
+ try{
+  const s=await fetch("https://api.coingecko.com/api/v3/search?query=gomining").then(r=>r.json());
+  const coin=(s.coins||[]).find(c=>String(c.name).toLowerCase().includes("gomining"))||(s.coins||[])[0];
+  if(!coin)throw Error();
+  const p=await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,${encodeURIComponent(coin.id)}&vs_currencies=usd`).then(r=>r.json());
+  E("btc").value=p.bitcoin.usd;E("gmt").value=p[coin.id].usd;E("updated").textContent=new Date().toLocaleString();E("priceStatus").textContent="Live";
+  save();calculate();
+ }catch(e){E("priceStatus").textContent="Live lookup blocked in this preview — using saved/manual prices";calculate();}
+}
+function tokenDiscount(days){if(days<18)return 0;return Math.min(20,Math.floor(days/18))/100}
+function terminalBTCPrice(){return N("btc")*Math.pow(1+N("btcGrowth")/100,N("years"))}
+function terminalGMTPrice(){return N("gmt")*Math.pow(1+N("gmtGrowth")/100,N("years"))}
+function miningBTCFromTH(th){
+ const dailyPerTH=N("net")/Math.max(N("hash"),1);
+ const totalDays=Math.max(0,Math.round(N("years")*365));
+ const monthlyFactor=Math.max(0.000001,1-N("decline")/100);
+ const dailyFactor=Math.pow(monthlyFactor,1/30.4375);
+ if(Math.abs(dailyFactor-1)<1e-12)return th*dailyPerTH*totalDays;
+ return th*dailyPerTH*(dailyFactor*(1-Math.pow(dailyFactor,totalDays))/(1-dailyFactor));
+}
+function gmtCoverageDiscount(wallet,locked){
+ const currentMaintGMT=(N("electricity")+N("service"))*N("btc")/Math.max(N("gmt"),1e-12);
+ const days=currentMaintGMT?(wallet+locked)/currentMaintGMT:0;
+ return {days,discount:tokenDiscount(days),maintGMT:currentMaintGMT};
+}
+function gmtMarginalBTC(qty,lock){
+ const before=gmtCoverageDiscount(N("wallet"),N("locked"));
+ const after=gmtCoverageDiscount(N("wallet")+(lock?0:qty),N("locked")+(lock?qty:0));
+ const grossMaintBTC=(N("electricity")+N("service"))/(1-N("discount")/100);
+ const extraDiscount=Math.max(0,after.discount-before.discount);
+ const savedBTC=grossMaintBTC*extraDiscount*N("years")*365;
+ const earningYears=lock?Math.min(N("lockYears"),N("years")):0;
+ const endQty=qty*Math.pow(1+N("apr")/100,earningYears);
+ const tokenBTC=endQty*terminalGMTPrice()/Math.max(terminalBTCPrice(),1e-12);
+ return savedBTC+tokenBTC;
+}
+function calcReward(){
+ const rewardBTC=N("net"),rewardUSD=rewardBTC*N("btc"),bonus=1+N("bonus")/100;
+ let a=[];
+ a.push({name:"BTC wallet",v:rewardBTC});
+ const th=rewardUSD/Math.max(N("rewardTH"),1e-12)*bonus;
+ a.push({name:"TH reinvestment",v:miningBTCFromTH(th)+(th*N("rewardTH")*N("thResidual")/100)/Math.max(terminalBTCPrice(),1e-12)});
+ const qty=rewardUSD/Math.max(N("gmt"),1e-12);
+ a.push({name:"GOMINING wallet",v:gmtMarginalBTC(qty,false)});
+ a.push({name:"GOMINING lock",v:gmtMarginalBTC(qty,true)});
+ a.sort((x,y)=>y.v-x.v);let max=a[0].v||1;a.forEach((x,i)=>{x.rank=i+1;x.score=100*x.v/max});
+ return a;
+}
+function calcFiat(){
+ const cash=N("fiat"),btc=N("btc"),hash=N("hash"),eff=N("eff");
+ let a=[];
+ a.push({name:"Buy BTC",v:cash/Math.max(btc,1e-12),ok:true});
+ const th=cash/Math.max(N("cashTH"),1e-12);
+ a.push({name:"Buy TH",v:miningBTCFromTH(th)+(th*N("cashTH")*N("thResidual")/100)/Math.max(terminalBTCPrice(),1e-12),ok:true});
+ const qty=cash/Math.max(N("gmt"),1e-12);
+ a.push({name:"Buy GOMINING — wallet",v:gmtMarginalBTC(qty,false),ok:true});
+ a.push({name:"Buy GOMINING — lock",v:gmtMarginalBTC(qty,true),ok:true});
+ const grossMaintBTC=(N("electricity")+N("service"))/(1-N("discount")/100);
+ for(const [w,cost] of [[14,N("u14")],[13,N("u13")],[12,N("u12")]]){
+   const fullCost=cost*hash, watts=Math.max(0,eff-w), fraction=Math.min(1,cash/Math.max(fullCost,1e-12));
+   const savedBTC=grossMaintBTC*(watts/Math.max(eff,1))*N("years")*365*fraction;
+   a.push({name:`Upgrade to ${w} W/TH`,v:savedBTC,ok:cash>=fullCost,fullCost});
+ }
+ a.sort((x,y)=>y.v-x.v);a.forEach((x,i)=>x.rank=i+1);return a;
+}
+function scenarioSet(){
+ const b=N("btcGrowth"),g=N("gmtGrowth"),d=N("decline");
+ return [
+  {name:"Bear",btcGrowth:Math.max(-10,b-15),gmtGrowth:g-15,decline:d+0.5},
+  {name:"Base",btcGrowth:b,gmtGrowth:g,decline:d},
+  {name:"Bull",btcGrowth:b+15,gmtGrowth:g+15,decline:Math.max(0,d-0.5)}
+ ];
+}
+function applyScenario(sc){
+ const old={b:N("btcGrowth"),g:N("gmtGrowth"),d:N("decline")};
+ E("btcGrowth").value=sc.btcGrowth;E("gmtGrowth").value=sc.gmtGrowth;E("decline").value=sc.decline;
+ return old;
+}
+function restoreScenario(old){E("btcGrowth").value=old.b;E("gmtGrowth").value=old.g;E("decline").value=old.d;}
+function confidenceText(wins,edge){
+ if(wins===3&&edge>=.10)return ["HIGH","conf-high"];
+ if(wins>=2&&edge>=.05)return ["MODERATE","conf-med"];
+ return ["LOW","conf-low"];
+}
+
+
+function rewardBreakdown(){
+ const rewardBTC=N("net"), rewardUSD=rewardBTC*N("btc"), bonus=1+N("bonus")/100;
+ const th=rewardUSD/Math.max(N("rewardTH"),1e-12)*bonus;
+ const thMining=miningBTCFromTH(th);
+ const thResidual=(th*N("rewardTH")*N("thResidual")/100)/Math.max(terminalBTCPrice(),1e-12);
+
+ const qty=rewardUSD/Math.max(N("gmt"),1e-12);
+ const before=gmtCoverageDiscount(N("wallet"),N("locked"));
+ const after=gmtCoverageDiscount(N("wallet"),N("locked")+qty);
+ const grossMaintBTC=(N("electricity")+N("service"))/(1-N("discount")/100);
+ const extraDiscount=Math.max(0,after.discount-before.discount);
+ const discountSavings=grossMaintBTC*extraDiscount*N("years")*365;
+ const earningYears=Math.min(N("lockYears"),N("years"));
+ const principalBTC=qty*terminalGMTPrice()/Math.max(terminalBTCPrice(),1e-12);
+ const endingQty=qty*Math.pow(1+N("apr")/100,earningYears);
+ const totalTokenBTC=endingQty*terminalGMTPrice()/Math.max(terminalBTCPrice(),1e-12);
+ const aprBTC=Math.max(0,totalTokenBTC-principalBTC);
+
+ return {
+   th:{mining:thMining,residual:thResidual,total:thMining+thResidual,quantity:th},
+   lock:{principal:principalBTC,apr:aprBTC,discount:discountSavings,total:principalBTC+aprBTC+discountSavings,quantity:qty,endingQty}
+ };
+}
+function updateRewardBreakdown(){
+ const b=rewardBreakdown();
+ const rows=[
+   {label:"Future BTC production",th:b.th.mining,lock:0,note:`TH adds ${b.th.quantity.toFixed(4)} TH and earns modeled mining rewards.`},
+   {label:"Residual asset value",th:b.th.residual,lock:b.lock.principal,note:"Remaining TH value versus the future BTC value of the original locked tokens."},
+   {label:"Lock APR growth",th:0,lock:b.lock.apr,note:`APR grows ${b.lock.quantity.toFixed(2)} tokens to approximately ${b.lock.endingQty.toFixed(2)} tokens.`},
+   {label:"Additional maintenance-discount savings",th:0,lock:b.lock.discount,note:"Only counts if this reward crosses an additional modeled discount tier."}
+ ];
+ E("breakdownRows").innerHTML=rows.map(r=>`<tr><td>${r.label}</td><td class="num">${btcFmt(r.th)} BTC</td><td class="num">${btcFmt(r.lock)} BTC</td><td>${r.note}</td></tr>`).join("");
+ E("thTotal").textContent=btcFmt(b.th.total)+" BTC";
+ E("lockTotal").textContent=btcFmt(b.lock.total)+" BTC";
+ const winner=b.th.total>=b.lock.total?"TH reinvestment":"GOMINING lock";
+ const high=Math.max(b.th.total,b.lock.total), low=Math.min(b.th.total,b.lock.total);
+ const edge=low>0?(high/low-1)*100:0;
+ E("breakdownGap").innerHTML=`<strong>${winner}</strong> is ahead by ${edge.toFixed(1)}% in the base case.`;
+ E("breakdownSummary").innerHTML=`The comparison below shows exactly where the modeled value comes from. It makes it easier to see whether the result is being driven mainly by future mining production, residual TH value, lock APR, or a maintenance-discount step.`;
+}
+
+function rewardWinner(){return calcReward()[0].name}
+function findSwitchPoint(id,start,end,step,direction){
+ const original=E(id).value;
+ let found=null;
+ if(direction==="up"){
+   for(let x=start;x<=end+1e-12;x+=step){
+     E(id).value=x;
+     if(rewardWinner()==="GOMINING lock"){found=x;break;}
+   }
+ }else{
+   for(let x=start;x>=end-1e-12;x-=step){
+     E(id).value=x;
+     if(rewardWinner()==="GOMINING lock"){found=x;break;}
+   }
+ }
+ E(id).value=original;
+ return found;
+}
+function fmtMoney(x,d=2){return "$"+Number(x).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d})}
+function updateSwitchThresholds(){
+ const currentWinner=rewardWinner();
+ const currentGMT=N("gmt"), currentTH=N("rewardTH"), currentAPR=N("apr"), currentYears=N("lockYears");
+ const gmtStep=Math.max(0.0005,currentGMT/500);
+ const gmtPoint=findSwitchPoint("gmt",currentGMT,Math.max(0.001,currentGMT*0.02),gmtStep,"down");
+ const thPoint=findSwitchPoint("rewardTH",currentTH,Math.max(100,currentTH*8),0.10,"up");
+ const aprPoint=findSwitchPoint("apr",currentAPR,200,0.25,"up");
+ const maxLock=Math.max(N("years"),10);
+ const yearsPoint=findSwitchPoint("lockYears",currentYears,maxLock,0.25,"up");
+ const rows=[
+  {label:"GOMINING token price",current:fmtMoney(currentGMT,4),point:gmtPoint===null?"No switch":fmtMoney(gmtPoint,4),change:gmtPoint===null?"Not enough by itself":`${((gmtPoint/currentGMT-1)*100).toFixed(1)}%`},
+  {label:"Reward TH price",current:fmtMoney(currentTH,2)+"/TH",point:thPoint===null?"No switch":fmtMoney(thPoint,2)+"/TH",change:thPoint===null?"Not enough by itself":`+${((thPoint/currentTH-1)*100).toFixed(1)}%`},
+  {label:"Lock APR",current:currentAPR.toFixed(2)+"%",point:aprPoint===null?"No switch":aprPoint.toFixed(2)+"%",change:aprPoint===null?"Not enough by itself":`+${(aprPoint-currentAPR).toFixed(2)} points`},
+  {label:"Lock period",current:currentYears.toFixed(2)+" years",point:yearsPoint===null?"No switch":yearsPoint.toFixed(2)+" years",change:yearsPoint===null?"Not enough by itself":`+${(yearsPoint-currentYears).toFixed(2)} years`}
+ ];
+ E("switchRows").innerHTML=rows.map(r=>`<tr><td>${r.label}</td><td>${r.current}</td><td><strong>${r.point}</strong></td><td>${r.change}</td></tr>`).join("");
+ E("switchSummary").innerHTML=currentWinner==="GOMINING lock"
+   ? `<span class="ok">GOMINING Lock already wins under the current base-case assumptions.</span>`
+   : `Current reward winner: <strong>${currentWinner}</strong>. The table shows the nearest one-variable change that makes <strong>GOMINING Lock</strong> the modeled winner.`;
+}
+
+function calculate(){
+ const modeled=N("pool")-N("electricity")-N("service"),diff=Math.abs(modeled-N("net"))/Math.max(N("net"),1e-12),passed=diff<=.01;
+ E("calibration").textContent=passed?`CALIBRATED ${(diff*100).toFixed(2)}%`:`CHECK INPUTS ${(diff*100).toFixed(2)}%`;
+ E("calibration").className="pill "+(passed?"ok":"bad");
+ const scenarios=scenarioSet(), rewardRuns=[], fiatRuns=[], rWins={}, fWins={};
+ scenarios.forEach(sc=>{const old=applyScenario(sc);const rr=calcReward();const ff=calcFiat().filter(x=>x.ok);restoreScenario(old);rewardRuns.push(rr);fiatRuns.push(ff);rWins[rr[0].name]=(rWins[rr[0].name]||0)+1;fWins[ff[0].name]=(fWins[ff[0].name]||0)+1;});
+ const r=rewardRuns[1],f=calcFiat(),threshold=N("threshold")/100;
+ const rEdge=r[1]?.v?r[0].v/r[1].v-1:Infinity;
+ const executable=fiatRuns[1],fEdge=executable[1]?.v?executable[0].v/executable[1].v-1:Infinity;
+ const rw=rWins[r[0].name]||0,fw=fWins[executable[0].name]||0;
+ const rc=confidenceText(rw,rEdge),fc=confidenceText(fw,fEdge);
+ if(!passed){E("rewardAction").textContent="DO NOT USE";E("rewardWhy").textContent="The app snapshot does not reconcile within 1%.";E("fiatAction").textContent="DO NOT USE";E("fiatWhy").textContent="Correct the miner inputs first."}
+ else{
+  E("rewardAction").textContent=rEdge<threshold?"KEEP CURRENT SETTING":r[0].name.toUpperCase();
+  E("rewardWhy").textContent=rEdge<threshold?`Top two are only ${(rEdge*100).toFixed(1)}% apart.`:`Base-case edge ${(rEdge*100).toFixed(1)}%; wins ${rw} of 3 scenarios.`;
+  E("rewardConfidence").innerHTML=`Confidence: <span class="${rc[1]}">${rc[0]}</span>`;
+  E("fiatAction").textContent=fEdge<threshold?"HOLD FIAT / NO CLEAR EDGE":executable[0].name.toUpperCase();
+  E("fiatWhy").textContent=fEdge<threshold?`Top executable choices are only ${(fEdge*100).toFixed(1)}% apart.`:`Best modeled use of $${N("fiat").toLocaleString()}; base-case edge ${(fEdge*100).toFixed(1)}%; wins ${fw} of 3 scenarios.`;
+  E("fiatConfidence").innerHTML=`Confidence: <span class="${fc[1]}">${fc[0]}</span>`;
+ }
+ E("rewardRows").innerHTML=r.map(x=>`<tr class="${x.rank===1?"winner":""}"><td>${x.rank}</td><td>${x.name}</td><td class="num">${btcFmt(x.v)} BTC</td><td class="num">${rWins[x.name]||0}/3</td></tr>`).join("");
+ E("fiatRows").innerHTML=f.map(x=>`<tr class="${x.rank===1?"winner":""}"><td>${x.rank}</td><td>${x.name}</td><td class="num">${btcFmt(x.v)} BTC</td><td>${x.ok?"Yes":`No — full cost $${x.fullCost.toLocaleString(undefined,{maximumFractionDigits:0})}`}</td></tr>`).join("");
+ E("scenarioRows").innerHTML=scenarios.map((sc,i)=>`<tr><td>${sc.name}</td><td>${rewardRuns[i][0].name}</td><td>${fiatRuns[i][0].name}</td></tr>`).join("");
+ updateRewardBreakdown();
+ updateSwitchThresholds();
+ save();
+}
+load();calculate();setTimeout(refreshPrices,0);
+</script></body></html>
