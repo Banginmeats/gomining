@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>GoMining Daily Action Dashboard v6.1</title>
+<title>GoMining Daily Action Dashboard v6.2</title>
 <style>
 :root{--navy:#17365d;--blue:#1f4e78;--green:#3c7a2b;--orange:#b75a12;--red:#b42318;--muted:#667085;--bg:#f4f6f9}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color:#17202a}
@@ -20,7 +20,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px;borde
 @media(max-width:500px){.inputs{grid-template-columns:1fr}main{padding:9px}.big{font-size:26px}}
 .conf-high{color:var(--green);font-weight:800}.conf-med{color:#9a6700;font-weight:800}.conf-low{color:var(--red);font-weight:800}</style></head>
 <body>
-<header><h1>GoMining Daily Action Dashboard v6.1</h1><p>Daily decisions, switch thresholds, and a transparent breakdown of why each reward option wins or loses.</p></header>
+<header><h1>GoMining Daily Action Dashboard v6.2</h1><p>Daily decisions, switch thresholds, and a transparent breakdown of why each reward option wins or loses.</p></header>
 <main><div class="grid">
 
 <section class="card s4"><h2>Live market prices</h2><div class="inputs live">
@@ -111,14 +111,32 @@ ids.forEach(id=>E(id).addEventListener("change",()=>{save();calculate()}));
 
 async function refreshPrices(){
  E("priceStatus").textContent="Refreshing…";
+ let priceUpdated=false;
  try{
-  const s=await fetch("https://api.coingecko.com/api/v3/search?query=gomining").then(r=>r.json());
+  const sResponse=await fetch("https://api.coingecko.com/api/v3/search?query=gomining");
+  if(!sResponse.ok)throw new Error("Coin search failed");
+  const s=await sResponse.json();
   const coin=(s.coins||[]).find(c=>String(c.name).toLowerCase().includes("gomining"))||(s.coins||[])[0];
-  if(!coin)throw Error();
-  const p=await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,${encodeURIComponent(coin.id)}&vs_currencies=usd`).then(r=>r.json());
-  E("btc").value=p.bitcoin.usd;E("gmt").value=p[coin.id].usd;E("updated").textContent=new Date().toLocaleString();E("priceStatus").textContent="Live";
-  save();calculate();
- }catch(e){E("priceStatus").textContent="Live lookup blocked in this preview — using saved/manual prices";calculate();}
+  if(!coin)throw new Error("GOMINING token not found");
+  const pResponse=await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,${encodeURIComponent(coin.id)}&vs_currencies=usd`);
+  if(!pResponse.ok)throw new Error("Price request failed");
+  const p=await pResponse.json();
+  if(!p.bitcoin?.usd || !p[coin.id]?.usd)throw new Error("Price data incomplete");
+  E("btc").value=p.bitcoin.usd;
+  E("gmt").value=p[coin.id].usd;
+  E("updated").textContent=new Date().toLocaleString();
+  E("priceStatus").textContent="Live";
+  priceUpdated=true;
+  save();
+ }catch(e){
+  E("priceStatus").textContent="Live price lookup unavailable — using saved/manual prices";
+ }
+ try{
+  calculate();
+ }catch(e){
+  console.error("Dashboard calculation error:",e);
+  if(priceUpdated)E("priceStatus").textContent="Live prices loaded";
+ }
 }
 function tokenDiscount(days){if(days<18)return 0;return Math.min(20,Math.floor(days/18))/100}
 function terminalBTCPrice(){return N("btc")*Math.pow(1+N("btcGrowth")/100,N("years"))}
