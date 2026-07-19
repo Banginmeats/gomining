@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#17365d">
-<title>GoMining Daily Action Dashboard v9 — OCR Edition</title>
+<title>GoMining Daily Action Dashboard v9.1 — OCR Update</title>
 <style>
 :root{
   --navy:#17365d;--blue:#1f4e78;--green:#3c7a2b;--orange:#b75a12;--red:#b42318;
@@ -65,6 +65,11 @@ details[open] summary{margin-bottom:14px}
 .detect-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .detected{background:#f8fafc;border:1px solid var(--line);padding:10px;border-radius:10px}
 .detected input{background:#ecf8e8}
+.detected.low input{background:#fdecec;border-color:#e39a9a}
+.detected.medium input{background:#fff5d6;border-color:#e2c36a}
+.detected.high input{background:#ecf8e8;border-color:#9bc58f}
+.conf-label{font-size:11px;font-weight:800;margin-top:4px}
+.history-empty{padding:12px;color:var(--muted);text-align:center}
 .rawtext{width:100%;min-height:150px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
 @media(max-width:800px){.ocr-layout{grid-template-columns:1fr}.detect-grid{grid-template-columns:1fr}}
 
@@ -78,8 +83,8 @@ details[open] summary{margin-bottom:14px}
 </head>
 <body>
 <header>
-  <h1>GoMining Daily Action Dashboard v9 — OCR Edition</h1>
-  <p>Upload a GoMining reward screenshot, verify the detected values, and update the validated decision engine.</p>
+  <h1>GoMining Daily Action Dashboard v9.1 — OCR Update</h1>
+  <p>Improved GoMining screenshot import with computing-power detection, verified auto-apply, confidence cues, and local snapshot history.</p>
 </header>
 
 <main><div class="grid">
@@ -149,16 +154,19 @@ details[open] summary{margin-bottom:14px}
         Detected values are never applied automatically. Review them first, then press <strong>Apply detected values</strong>.
       </div>
       <div class="detect-grid">
-        <div class="detected"><label>Pool reward (BTC/day)</label><input id="ocrPool" type="number" step=".00000001"></div>
-        <div class="detected"><label>Electricity (BTC/day)</label><input id="ocrElectricity" type="number" step=".00000001"></div>
-        <div class="detected"><label>Service (BTC/day)</label><input id="ocrService" type="number" step=".00000001"></div>
-        <div class="detected"><label>Net reward (BTC/day)</label><input id="ocrNet" type="number" step=".00000001"></div>
-        <div class="detected"><label>Discount (%)</label><input id="ocrDiscount" type="number" step=".01"></div>
-        <div class="detected"><label>Hashrate (TH)</label><input id="ocrHash" type="number" step=".01"></div>
+        <div id="boxOcrPool" class="detected"><label>Pool reward (BTC/day)</label><input id="ocrPool" type="number" step=".00000001"><div id="confOcrPool" class="conf-label"></div></div>
+        <div id="boxOcrElectricity" class="detected"><label>Electricity (BTC/day)</label><input id="ocrElectricity" type="number" step=".00000001"><div id="confOcrElectricity" class="conf-label"></div></div>
+        <div id="boxOcrService" class="detected"><label>Service (BTC/day)</label><input id="ocrService" type="number" step=".00000001"><div id="confOcrService" class="conf-label"></div></div>
+        <div id="boxOcrNet" class="detected"><label>Net reward (BTC/day)</label><input id="ocrNet" type="number" step=".00000001"><div id="confOcrNet" class="conf-label"></div></div>
+        <div id="boxOcrDiscount" class="detected"><label>Discount (%)</label><input id="ocrDiscount" type="number" step=".01"><div id="confOcrDiscount" class="conf-label"></div></div>
+        <div id="boxOcrHash" class="detected"><label>Hashrate (TH)</label><input id="ocrHash" type="number" step=".01"><div id="confOcrHash" class="conf-label"></div></div>
       </div>
       <div id="ocrReconcile" class="why"></div>
       <div class="btnrow" style="margin-top:12px">
         <button id="ocrApplyBtn" onclick="applyOCRValues()" disabled>Apply detected values</button>
+        <label style="display:flex;align-items:center;gap:7px;margin:0;font-size:13px">
+          <input id="ocrAutoApply" type="checkbox" style="width:auto"> Auto-apply only when all values are verified
+        </label>
       </div>
       <details style="margin-top:12px">
         <summary>Show OCR text</summary>
@@ -166,6 +174,20 @@ details[open] summary{margin-bottom:14px}
       </details>
     </div>
   </div>
+</section>
+
+<section class="card s12">
+  <div class="flex between">
+    <h2>Imported snapshot history</h2>
+    <button class="secondary" onclick="clearSnapshotHistory()">Clear history</button>
+  </div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Date imported</th><th>Reward date</th><th class="num">Hashrate</th><th class="num">Pool</th><th class="num">Electricity</th><th class="num">Service</th><th class="num">Net</th><th class="num">Discount</th></tr></thead>
+      <tbody id="snapshotHistoryRows"></tbody>
+    </table>
+  </div>
+  <div id="snapshotHistoryEmpty" class="history-empty">No OCR snapshots saved yet.</div>
 </section>
 
 <section class="card s12">
@@ -325,7 +347,7 @@ const DEFAULTS={
  lockYears:"4",years:"10",decline:"1",btcGrowth:"15",gmtGrowth:"0",thResidual:"35",threshold:"5"
 };
 const ids=Object.keys(DEFAULTS),E=id=>document.getElementById(id),N=id=>Number(E(id)?.value)||0;
-const STORAGE_KEY="gomining-dashboard-v9";
+const STORAGE_KEY="gomining-dashboard-v9-1";
 let marketState={mode:"manual",lastSuccess:null,cooldownUntil:0};
 let latest={rewardRuns:[],fiatRuns:[],rewardWinCount:{},fiatWinCount:{},baseReward:[],baseFiat:[],validation:[]};
 
@@ -336,7 +358,7 @@ const esc=s=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 
 function load(){
  let saved={};
- try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
+ try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v9")||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
  ids.forEach(id=>E(id).value=(saved.values&&saved.values[id]!==undefined)?saved.values[id]:DEFAULTS[id]);
  marketState=saved.marketState||marketState;
  updateMarketStatus();
@@ -796,10 +818,15 @@ function parseOCR(text){
    pool:findNearbyValue(lines,[/pool.*reward/,/gross.*reward/,/mining.*reward/],btcVal),
    electricity:findNearbyValue(lines,[/electric/,/energy/],btcVal),
    service:findNearbyValue(lines,[/service/,/maintenance fee/],btcVal),
-   net:findNearbyValue(lines,[/net.*reward/,/your.*reward/,/reward.*after/],btcVal),
-   discount:findNearbyValue(lines,[/discount/],discountVal),
-   hash:findNearbyValue(lines,[/hashrate/,/hash rate/,/\bth\b/],hashVal)
+   net:findNearbyValue(lines,[/^reward\b/,/net.*reward/,/your.*reward/,/reward.*after/],btcVal),
+   discount:findNearbyValue(lines,[/total.*discount/,/discount/],discountVal),
+   hash:findNearbyValue(lines,[/computing.*power/,/hashrate/,/hash rate/,/\bth\/?s\b/],hashVal),
+   rewardDate:null,
+   confidence:{}
  };
+ const dateMatch=text.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
+ if(dateMatch)result.rewardDate=dateMatch[1];
+
  // Fallback: identify BTC decimals and use reconciliation/permitted ordering.
  const decimals=[];
  lines.forEach(line=>numberCandidates(line).forEach(n=>{if(btcVal(n)&&n>0.0000001)decimals.push(n)}));
@@ -814,8 +841,51 @@ function parseOCR(text){
    if(result.electricity==null&&costs.length)result.electricity=Math.max(...costs);
    if(result.service==null&&costs.length>1)result.service=Math.min(...costs);
  }
+ for(const key of ["pool","electricity","service","net","discount","hash"]){
+   result.confidence[key]=result[key]==null?"low":"high";
+ }
+ if(result.hash!=null && !/computing.*power|hashrate|hash rate/i.test(text))result.confidence.hash="medium";
  return result;
 }
+
+function setOCRConfidence(field,level){
+ const map={
+  pool:["boxOcrPool","confOcrPool"],electricity:["boxOcrElectricity","confOcrElectricity"],
+  service:["boxOcrService","confOcrService"],net:["boxOcrNet","confOcrNet"],
+  discount:["boxOcrDiscount","confOcrDiscount"],hash:["boxOcrHash","confOcrHash"]
+ };
+ const [box,conf]=map[field];
+ E(box).className="detected "+level;
+ E(conf).className="conf-label "+(level==="high"?"ok":level==="medium"?"warn":"bad");
+ E(conf).textContent=level==="high"?"High confidence":level==="medium"?"Review value":"Not detected";
+}
+function allOCRValuesPresent(){
+ return ["ocrPool","ocrElectricity","ocrService","ocrNet","ocrDiscount","ocrHash"].every(id=>E(id).value!=="");
+}
+function ocrReconciliationPasses(){
+ const p=Number(E("ocrPool").value),el=Number(E("ocrElectricity").value),s=Number(E("ocrService").value),n=Number(E("ocrNet").value);
+ if(![p,el,s,n].every(Number.isFinite)||p<=0)return false;
+ return Math.abs((p-el-s)-n)/Math.max(n,1e-12)<=.01;
+}
+function loadSnapshotHistory(){
+ try{return JSON.parse(localStorage.getItem("gomining-ocr-history")||"[]")}catch(e){return[]}
+}
+function saveSnapshotHistory(entry){
+ const history=loadSnapshotHistory();
+ history.unshift(entry);
+ localStorage.setItem("gomining-ocr-history",JSON.stringify(history.slice(0,90)));
+ renderSnapshotHistory();
+}
+function renderSnapshotHistory(){
+ const rows=loadSnapshotHistory();
+ E("snapshotHistoryRows").innerHTML=rows.map(x=>`<tr><td>${new Date(x.importedAt).toLocaleString()}</td><td>${x.rewardDate||"—"}</td><td class="num">${x.hash??"—"}</td><td class="num">${x.pool??"—"}</td><td class="num">${x.electricity??"—"}</td><td class="num">${x.service??"—"}</td><td class="num">${x.net??"—"}</td><td class="num">${x.discount!=null?x.discount+"%":"—"}</td></tr>`).join("");
+ E("snapshotHistoryEmpty").classList.toggle("hidden",rows.length>0);
+}
+function clearSnapshotHistory(){
+ if(!confirm("Clear all locally saved OCR snapshot history?"))return;
+ localStorage.removeItem("gomining-ocr-history");renderSnapshotHistory();
+}
+
 async function runOCR(){
  if(!ocrImageData)return;
  if(typeof Tesseract==="undefined"){E("ocrStatus").textContent="OCR library failed to load. Check your internet connection.";return}
@@ -835,13 +905,17 @@ async function runOCR(){
    E("ocrRaw").value=data.text||"";
    const found=parseOCR(data.text||"");
    const map={pool:"ocrPool",electricity:"ocrElectricity",service:"ocrService",net:"ocrNet",discount:"ocrDiscount",hash:"ocrHash"};
-   Object.entries(map).forEach(([key,id])=>E(id).value=found[key]??"");
-   const count=Object.values(found).filter(v=>v!=null).length;
-   E("ocrStatus").textContent=`OCR complete. Detected ${count} of 6 target values.`;
-   E("ocrPill").textContent=count>=4?"Review values":"Needs review";
-   E("ocrPill").className="pill "+(count>=4?"live":"manual");
+   Object.entries(map).forEach(([key,id])=>{E(id).value=found[key]??"";setOCRConfidence(key,found.confidence[key]||"low")});
+   E("ocrFile").dataset.rewardDate=found.rewardDate||"";
+   const count=Object.keys(map).filter(k=>found[k]!=null).length;
+   E("ocrStatus").textContent=`OCR complete. Detected ${count} of 6 target values${found.rewardDate?` for ${found.rewardDate}`:""}.`;
+   E("ocrPill").textContent=count===6?"Verified fields":count>=4?"Review values":"Needs review";
+   E("ocrPill").className="pill "+(count===6?"live":count>=4?"cached":"manual");
    E("ocrApplyBtn").disabled=count===0;
    updateOCRReconciliation();
+   if(E("ocrAutoApply").checked&&allOCRValuesPresent()&&ocrReconciliationPasses()){
+     applyOCRValues(true);
+   }
  }catch(err){
    console.error(err);E("ocrStatus").textContent="OCR failed. Try a tighter or clearer screenshot.";
    E("ocrPill").textContent="Failed";E("ocrPill").className="pill manual";
@@ -856,24 +930,36 @@ function updateOCRReconciliation(){
      :`<span class="bad">Check the values:</span> calculated net is ${btcFmt(calc)} BTC; difference ${(diff*100).toFixed(2)}%.`;
  }else E("ocrReconcile").textContent="Enter or detect all four BTC values to run the reconciliation check.";
 }
-function applyOCRValues(){
+function applyOCRValues(auto=false){
  const pairs=[["ocrPool","pool"],["ocrElectricity","electricity"],["ocrService","service"],["ocrNet","net"],["ocrDiscount","discount"],["ocrHash","hash"]];
  let applied=0;
  pairs.forEach(([from,to])=>{if(E(from).value!==""&&Number.isFinite(Number(E(from).value))){E(to).value=E(from).value;applied++}});
  localStorage.setItem("gomining-snapshot-at",new Date().toISOString());
+ saveSnapshotHistory({
+   importedAt:new Date().toISOString(),
+   rewardDate:E("ocrFile").dataset.rewardDate||null,
+   pool:Number(E("ocrPool").value)||null,
+   electricity:Number(E("ocrElectricity").value)||null,
+   service:Number(E("ocrService").value)||null,
+   net:Number(E("ocrNet").value)||null,
+   discount:Number(E("ocrDiscount").value)||null,
+   hash:Number(E("ocrHash").value)||null
+ });
  persist();calculate();
- E("ocrStatus").textContent=`Applied ${applied} detected values and saved today’s miner snapshot.`;
+ E("ocrStatus").textContent=`${auto?"Automatically applied":"Applied"} ${applied} verified values and saved the snapshot.`;
  E("ocrPill").textContent="Applied";E("ocrPill").className="pill live";
 }
 function clearOCR(){
  ocrImageData=null;E("ocrFile").value="";E("ocrPreview").src="";E("ocrPreview").classList.add("hidden");
  ["ocrPool","ocrElectricity","ocrService","ocrNet","ocrDiscount","ocrHash"].forEach(id=>E(id).value="");
+ [["pool","boxOcrPool","confOcrPool"],["electricity","boxOcrElectricity","confOcrElectricity"],["service","boxOcrService","confOcrService"],["net","boxOcrNet","confOcrNet"],["discount","boxOcrDiscount","confOcrDiscount"],["hash","boxOcrHash","confOcrHash"]].forEach(x=>{E(x[1]).className="detected";E(x[2]).textContent=""});
  E("ocrRaw").value="";E("ocrProgress").style.width="0";E("ocrReadBtn").disabled=true;E("ocrApplyBtn").disabled=true;
  E("ocrStatus").textContent="No screenshot selected.";E("ocrReconcile").textContent="";
  E("ocrPill").textContent="Ready";E("ocrPill").className="pill";
 }
 
 setupOCR();
+renderSnapshotHistory();
 load();calculate();setTimeout(()=>refreshPrices(true),250);
 </script>
 </body></html>
