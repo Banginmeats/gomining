@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#17365d">
-<title>GoMining Daily Action Dashboard v9.1 — OCR Update</title>
+<title>GoMining Daily Action Dashboard v9.2 — Smart OCR</title>
 <style>
 :root{
   --navy:#17365d;--blue:#1f4e78;--green:#3c7a2b;--orange:#b75a12;--red:#b42318;
@@ -83,8 +83,8 @@ details[open] summary{margin-bottom:14px}
 </head>
 <body>
 <header>
-  <h1>GoMining Daily Action Dashboard v9.1 — OCR Update</h1>
-  <p>Improved GoMining screenshot import with computing-power detection, verified auto-apply, confidence cues, and local snapshot history.</p>
+  <h1>GoMining Daily Action Dashboard v9.2 — Smart OCR</h1>
+  <p>Smart GoMining screenshot import with automatic reward-panel cropping, fuzzy label matching, row-based fallback parsing, verified auto-apply, and local snapshot history.</p>
 </header>
 
 <main><div class="grid">
@@ -142,7 +142,7 @@ details[open] summary{margin-bottom:14px}
         <input id="ocrFile" type="file" accept="image/png,image/jpeg,image/webp,image/*">
         <img id="ocrPreview" class="preview hidden" alt="Screenshot preview">
       </div>
-      <div id="ocrStatus" class="why">No screenshot selected.</div>
+      <div id="ocrStatus" class="why">No screenshot selected.</div><div id="ocrMode" class="muted"></div>
       <div class="progress"><span id="ocrProgress"></span></div>
       <div class="btnrow" style="margin-top:12px">
         <button id="ocrReadBtn" onclick="runOCR()" disabled>Read screenshot</button>
@@ -347,7 +347,7 @@ const DEFAULTS={
  lockYears:"4",years:"10",decline:"1",btcGrowth:"15",gmtGrowth:"0",thResidual:"35",threshold:"5"
 };
 const ids=Object.keys(DEFAULTS),E=id=>document.getElementById(id),N=id=>Number(E(id)?.value)||0;
-const STORAGE_KEY="gomining-dashboard-v9-1";
+const STORAGE_KEY="gomining-dashboard-v9-2";
 let marketState={mode:"manual",lastSuccess:null,cooldownUntil:0};
 let latest={rewardRuns:[],fiatRuns:[],rewardWinCount:{},fiatWinCount:{},baseReward:[],baseFiat:[],validation:[]};
 
@@ -358,7 +358,7 @@ const esc=s=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 
 function load(){
  let saved={};
- try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v9")||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
+ try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v9-1")||localStorage.getItem("gomining-dashboard-v9")||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
  ids.forEach(id=>E(id).value=(saved.values&&saved.values[id]!==undefined)?saved.values[id]:DEFAULTS[id]);
  marketState=saved.marketState||marketState;
  updateMarketStatus();
@@ -775,18 +775,31 @@ async function preprocessOCRImage(dataUrl){
  return new Promise((resolve,reject)=>{
    const img=new Image();
    img.onload=()=>{
-     const scale=Math.min(2.2,Math.max(1,1800/img.width));
+     // GoMining screenshots normally place the reward panel in the central 82% of the image.
+     // Crop phone chrome, bottom navigation, and side margins before OCR.
+     const cropX=Math.round(img.width*0.06);
+     const cropY=Math.round(img.height*0.10);
+     const cropW=Math.round(img.width*0.88);
+     const cropH=Math.round(img.height*0.78);
+     const targetWidth=1900;
+     const scale=Math.max(1,targetWidth/cropW);
+
      const canvas=document.createElement("canvas");
-     canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);
+     canvas.width=Math.round(cropW*scale);
+     canvas.height=Math.round(cropH*scale);
      const ctx=canvas.getContext("2d",{willReadFrequently:true});
-     ctx.drawImage(img,0,0,canvas.width,canvas.height);
+     ctx.drawImage(img,cropX,cropY,cropW,cropH,0,0,canvas.width,canvas.height);
+
      const im=ctx.getImageData(0,0,canvas.width,canvas.height),d=im.data;
      for(let i=0;i<d.length;i+=4){
        const gray=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-       const v=gray>185?255:gray<70?0:Math.max(0,Math.min(255,(gray-128)*1.55+128));
+       // Increase contrast while retaining decimal points and thin labels.
+       const contrast=Math.max(0,Math.min(255,(gray-128)*1.8+128));
+       const v=contrast>210?255:contrast<42?0:contrast;
        d[i]=d[i+1]=d[i+2]=v;
      }
-     ctx.putImageData(im,0,0);resolve(canvas.toDataURL("image/png"));
+     ctx.putImageData(im,0,0);
+     resolve({dataUrl:canvas.toDataURL("image/png"),crop:{x:cropX,y:cropY,w:cropW,h:cropH}});
    };
    img.onerror=reject;img.src=dataUrl;
  });
@@ -811,40 +824,117 @@ function findNearbyValue(lines,patterns,validator){
  }
  return null;
 }
+
+function fuzzyIncludes(line,words){
+ const norm=line.toLowerCase().replace(/[^a-z0-9.%/ ]/g," ").replace(/\s+/g," ").trim();
+ return words.some(w=>{
+   const target=w.toLowerCase();
+   if(norm.includes(target))return true;
+   // Loose OCR tolerance: compare compacted tokens and allow one-character mistakes.
+   const compact=norm.replace(/\s/g,""),tcompact=target.replace(/\s/g,"");
+   if(compact.includes(tcompact))return true;
+   for(let i=0;i<=compact.length-tcompact.length;i++){
+     const slice=compact.slice(i,i+tcompact.length);
+     let diff=0;
+     for(let j=0;j<tcompact.length;j++)if(slice[j]!==tcompact[j])diff++;
+     if(diff<=Math.max(1,Math.floor(tcompact.length*.18)))return true;
+   }
+   return false;
+ });
+}
+function valueOnSameOrNextRows(lines,index,validator,maxLook=3){
+ for(let j=index;j<=Math.min(lines.length-1,index+maxLook);j++){
+   const nums=numberCandidates(lines[j]);
+   for(let k=nums.length-1;k>=0;k--)if(validator(nums[k]))return nums[k];
+ }
+ return null;
+}
+function findFuzzyValue(lines,labels,validator){
+ for(let i=0;i<lines.length;i++){
+   if(fuzzyIncludes(lines[i],labels)){
+     const v=valueOnSameOrNextRows(lines,i,validator,3);
+     if(v!=null)return v;
+   }
+ }
+ return null;
+}
+function rowSequenceFallback(lines){
+ // GoMining row order:
+ // Date, Computing power, Reward, Pool reward, GoBTC, Electricity, Service, Address, Total discount.
+ const out={};
+ const labels=[
+   {key:"hash",names:["computing power","computing pover","computing powe","hashrate","hash rate"],validator:n=>n>10&&n<100000},
+   {key:"net",names:["reward"],validator:n=>n>0&&n<.01},
+   {key:"pool",names:["pool reward","pool reword","pool rewrd"],validator:n=>n>0&&n<.01},
+   {key:"electricity",names:["electricity","electric","electrlcity"],validator:n=>n>0&&n<.01},
+   {key:"service",names:["service","servlce"],validator:n=>n>0&&n<.01},
+   {key:"discount",names:["total discount","discount"],validator:n=>n>=0&&n<=50}
+ ];
+ for(const item of labels){
+   for(let i=0;i<lines.length;i++){
+     if(fuzzyIncludes(lines[i],item.names)){
+       const v=valueOnSameOrNextRows(lines,i,item.validator,2);
+       if(v!=null){out[item.key]=v;break}
+     }
+   }
+ }
+ return out;
+}
+
 function parseOCR(text){
  const lines=text.split(/\n+/).map(x=>x.trim()).filter(Boolean);
  const btcVal=n=>n>0&&n<.01,discountVal=n=>n>=0&&n<=50,hashVal=n=>n>10&&n<100000;
+
  const result={
-   pool:findNearbyValue(lines,[/pool.*reward/,/gross.*reward/,/mining.*reward/],btcVal),
-   electricity:findNearbyValue(lines,[/electric/,/energy/],btcVal),
-   service:findNearbyValue(lines,[/service/,/maintenance fee/],btcVal),
-   net:findNearbyValue(lines,[/^reward\b/,/net.*reward/,/your.*reward/,/reward.*after/],btcVal),
-   discount:findNearbyValue(lines,[/total.*discount/,/discount/],discountVal),
-   hash:findNearbyValue(lines,[/computing.*power/,/hashrate/,/hash rate/,/\bth\/?s\b/],hashVal),
+   pool:findFuzzyValue(lines,["pool reward","pool reword","pool rewrd","gross reward","mining reward"],btcVal),
+   electricity:findFuzzyValue(lines,["electricity","electric","energy"],btcVal),
+   service:findFuzzyValue(lines,["service","servlce","maintenance fee"],btcVal),
+   net:findFuzzyValue(lines,["net reward","your reward","reward after","reward"],btcVal),
+   discount:findFuzzyValue(lines,["total discount","discount"],discountVal),
+   hash:findFuzzyValue(lines,["computing power","computing pover","computing powe","hashrate","hash rate","th/s"],hashVal),
    rewardDate:null,
-   confidence:{}
+   confidence:{},
+   parserMode:"labels"
  };
+
  const dateMatch=text.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
  if(dateMatch)result.rewardDate=dateMatch[1];
 
- // Fallback: identify BTC decimals and use reconciliation/permitted ordering.
+ // Row-layout fallback for fields missed by label parsing.
+ const fallback=rowSequenceFallback(lines);
+ for(const key of ["pool","electricity","service","net","discount","hash"]){
+   if(result[key]==null&&fallback[key]!=null){
+     result[key]=fallback[key];
+     result.confidence[key]="medium";
+     result.parserMode="labels + row fallback";
+   }
+ }
+
+ // Decimal-based reconciliation fallback.
  const decimals=[];
  lines.forEach(line=>numberCandidates(line).forEach(n=>{if(btcVal(n)&&n>0.0000001)decimals.push(n)}));
  const unique=[...new Set(decimals.map(n=>n.toFixed(8)))].map(Number);
- if(result.pool==null&&unique.length)result.pool=Math.max(...unique);
+
+ if(result.pool==null&&unique.length){
+   result.pool=Math.max(...unique);result.confidence.pool="medium";result.parserMode="numeric fallback";
+ }
  if(result.net==null&&result.pool!=null){
    const possible=unique.filter(n=>n<result.pool);
-   if(possible.length)result.net=Math.min(...possible);
+   if(possible.length){result.net=Math.min(...possible);result.confidence.net="medium";result.parserMode="numeric fallback"}
  }
  if(result.pool!=null&&result.net!=null){
    const costs=unique.filter(n=>n<result.pool&&n>result.net);
-   if(result.electricity==null&&costs.length)result.electricity=Math.max(...costs);
-   if(result.service==null&&costs.length>1)result.service=Math.min(...costs);
+   if(result.electricity==null&&costs.length){
+     result.electricity=Math.max(...costs);result.confidence.electricity="medium";result.parserMode="numeric fallback";
+   }
+   if(result.service==null&&costs.length>1){
+     result.service=Math.min(...costs);result.confidence.service="medium";result.parserMode="numeric fallback";
+   }
  }
+
  for(const key of ["pool","electricity","service","net","discount","hash"]){
-   result.confidence[key]=result[key]==null?"low":"high";
+   if(!result.confidence[key])result.confidence[key]=result[key]==null?"low":"high";
  }
- if(result.hash!=null && !/computing.*power|hashrate|hash rate/i.test(text))result.confidence.hash="medium";
  return result;
 }
 
@@ -901,7 +991,7 @@ async function runOCR(){
        }
      }});
    }
-   const {data}=await ocrWorker.recognize(prepared);
+   const {data}=await ocrWorker.recognize(prepared.dataUrl);
    E("ocrRaw").value=data.text||"";
    const found=parseOCR(data.text||"");
    const map={pool:"ocrPool",electricity:"ocrElectricity",service:"ocrService",net:"ocrNet",discount:"ocrDiscount",hash:"ocrHash"};
@@ -909,6 +999,7 @@ async function runOCR(){
    E("ocrFile").dataset.rewardDate=found.rewardDate||"";
    const count=Object.keys(map).filter(k=>found[k]!=null).length;
    E("ocrStatus").textContent=`OCR complete. Detected ${count} of 6 target values${found.rewardDate?` for ${found.rewardDate}`:""}.`;
+   E("ocrMode").textContent=`Parser: ${found.parserMode}. Reward panel automatically cropped before OCR.`;
    E("ocrPill").textContent=count===6?"Verified fields":count>=4?"Review values":"Needs review";
    E("ocrPill").className="pill "+(count===6?"live":count>=4?"cached":"manual");
    E("ocrApplyBtn").disabled=count===0;
@@ -954,7 +1045,7 @@ function clearOCR(){
  ["ocrPool","ocrElectricity","ocrService","ocrNet","ocrDiscount","ocrHash"].forEach(id=>E(id).value="");
  [["pool","boxOcrPool","confOcrPool"],["electricity","boxOcrElectricity","confOcrElectricity"],["service","boxOcrService","confOcrService"],["net","boxOcrNet","confOcrNet"],["discount","boxOcrDiscount","confOcrDiscount"],["hash","boxOcrHash","confOcrHash"]].forEach(x=>{E(x[1]).className="detected";E(x[2]).textContent=""});
  E("ocrRaw").value="";E("ocrProgress").style.width="0";E("ocrReadBtn").disabled=true;E("ocrApplyBtn").disabled=true;
- E("ocrStatus").textContent="No screenshot selected.";E("ocrReconcile").textContent="";
+ E("ocrStatus").textContent="No screenshot selected.";E("ocrMode").textContent="";E("ocrReconcile").textContent="";
  E("ocrPill").textContent="Ready";E("ocrPill").className="pill";
 }
 
