@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#17365d">
-<title>GoMining Daily Action Dashboard v9.2 — Smart OCR</title>
+<title>GoMining Daily Action Dashboard v9.3 — Reliable Hashrate OCR</title>
 <style>
 :root{
   --navy:#17365d;--blue:#1f4e78;--green:#3c7a2b;--orange:#b75a12;--red:#b42318;
@@ -83,8 +83,8 @@ details[open] summary{margin-bottom:14px}
 </head>
 <body>
 <header>
-  <h1>GoMining Daily Action Dashboard v9.2 — Smart OCR</h1>
-  <p>Smart GoMining screenshot import with automatic reward-panel cropping, fuzzy label matching, row-based fallback parsing, verified auto-apply, and local snapshot history.</p>
+  <h1>GoMining Daily Action Dashboard v9.3 — Reliable Hashrate OCR</h1>
+  <p>Reliable GoMining screenshot import with separate top-panel OCR, numeric hashrate recovery, verified auto-apply, and local snapshot history.</p>
 </header>
 
 <main><div class="grid">
@@ -164,6 +164,7 @@ details[open] summary{margin-bottom:14px}
       <div id="ocrReconcile" class="why"></div>
       <div class="btnrow" style="margin-top:12px">
         <button id="ocrApplyBtn" onclick="applyOCRValues()" disabled>Apply detected values</button>
+        <button id="usePreviousHashBtn" class="secondary hidden" onclick="usePreviousHashrate()">Use current saved hashrate</button>
         <label style="display:flex;align-items:center;gap:7px;margin:0;font-size:13px">
           <input id="ocrAutoApply" type="checkbox" style="width:auto"> Auto-apply only when all values are verified
         </label>
@@ -347,7 +348,7 @@ const DEFAULTS={
  lockYears:"4",years:"10",decline:"1",btcGrowth:"15",gmtGrowth:"0",thResidual:"35",threshold:"5"
 };
 const ids=Object.keys(DEFAULTS),E=id=>document.getElementById(id),N=id=>Number(E(id)?.value)||0;
-const STORAGE_KEY="gomining-dashboard-v9-2";
+const STORAGE_KEY="gomining-dashboard-v9-3";
 let marketState={mode:"manual",lastSuccess:null,cooldownUntil:0};
 let latest={rewardRuns:[],fiatRuns:[],rewardWinCount:{},fiatWinCount:{},baseReward:[],baseFiat:[],validation:[]};
 
@@ -358,7 +359,7 @@ const esc=s=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 
 function load(){
  let saved={};
- try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v9-1")||localStorage.getItem("gomining-dashboard-v9")||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
+ try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v9-2")||localStorage.getItem("gomining-dashboard-v9-1")||localStorage.getItem("gomining-dashboard-v9")||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
  ids.forEach(id=>E(id).value=(saved.values&&saved.values[id]!==undefined)?saved.values[id]:DEFAULTS[id]);
  marketState=saved.marketState||marketState;
  updateMarketStatus();
@@ -804,6 +805,62 @@ async function preprocessOCRImage(dataUrl){
    img.onerror=reject;img.src=dataUrl;
  });
 }
+
+async function preprocessTopPanel(dataUrl){
+ return new Promise((resolve,reject)=>{
+   const img=new Image();
+   img.onload=()=>{
+     // Focus tightly on Date + Computing power + Reward + Pool reward.
+     const cropX=Math.round(img.width*0.08);
+     const cropY=Math.round(img.height*0.17);
+     const cropW=Math.round(img.width*0.84);
+     const cropH=Math.round(img.height*0.30);
+     const targetWidth=1900;
+     const scale=Math.max(1,targetWidth/cropW);
+
+     const canvas=document.createElement("canvas");
+     canvas.width=Math.round(cropW*scale);
+     canvas.height=Math.round(cropH*scale);
+     const ctx=canvas.getContext("2d",{willReadFrequently:true});
+     ctx.drawImage(img,cropX,cropY,cropW,cropH,0,0,canvas.width,canvas.height);
+
+     const im=ctx.getImageData(0,0,canvas.width,canvas.height),d=im.data;
+     for(let i=0;i<d.length;i+=4){
+       const gray=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+       const contrast=Math.max(0,Math.min(255,(gray-128)*2.0+128));
+       const v=contrast>205?255:contrast<38?0:contrast;
+       d[i]=d[i+1]=d[i+2]=v;
+     }
+     ctx.putImageData(im,0,0);
+     resolve(canvas.toDataURL("image/png"));
+   };
+   img.onerror=reject;img.src=dataUrl;
+ });
+}
+function findHashrateByNumericRange(text){
+ const candidates=(normalizeOCRText(text).match(/\b\d{2,5}(?:[.,]\d{1,4})?\b/g)||[])
+   .map(x=>Number(x.replace(/,/g,"")))
+   .filter(n=>Number.isFinite(n)&&n>=100&&n<=50000);
+
+ // Exclude likely dates, times, addresses, and percentages.
+ const filtered=candidates.filter(n=>{
+   if(n>=1900&&n<=2100)return false;      // year
+   if(Number.isInteger(n)&&n<=1231)return false; // likely date fragment/time
+   if(n===6985)return false;               // address suffix visible in GoMining screenshots
+   return true;
+ });
+
+ // GoMining computing power is normally the only 4-digit decimal value in this range.
+ const decimals=filtered.filter(n=>Math.abs(n-Math.round(n))>.0001);
+ if(decimals.length){
+   // Prefer values closest to the current saved hashrate when available.
+   const current=N("hash")||1000;
+   decimals.sort((a,b)=>Math.abs(a-current)-Math.abs(b-current));
+   return decimals[0];
+ }
+ return null;
+}
+
 function normalizeOCRText(s){
  return s.replace(/[|]/g,"I").replace(/[Oo](?=\.\d)/g,"0").replace(/(?<=\d)[,](?=\d{3,8}\b)/g,".");
 }
@@ -983,6 +1040,7 @@ async function runOCR(){
  E("ocrPill").textContent="Reading";E("ocrPill").className="pill cached";
  try{
    const prepared=await preprocessOCRImage(ocrImageData);
+   const topPrepared=await preprocessTopPanel(ocrImageData);
    if(!ocrWorker){
      ocrWorker=await Tesseract.createWorker("eng",1,{logger:m=>{
        if(m.progress!=null){
@@ -991,9 +1049,22 @@ async function runOCR(){
        }
      }});
    }
-   const {data}=await ocrWorker.recognize(prepared.dataUrl);
-   E("ocrRaw").value=data.text||"";
-   const found=parseOCR(data.text||"");
+   const fullResult=await ocrWorker.recognize(prepared.dataUrl);
+   E("ocrStatus").textContent="Reading computing power…";
+   const topResult=await ocrWorker.recognize(topPrepared);
+   const combinedText=(fullResult.data.text||"")+"\n--- TOP PANEL ---\n"+(topResult.data.text||"");
+   E("ocrRaw").value=combinedText;
+   const found=parseOCR(combinedText);
+
+   // Final hashrate fallback: use the only plausible 4-digit decimal from the top panel.
+   if(found.hash==null){
+     const numericHash=findHashrateByNumericRange(topResult.data.text||"");
+     if(numericHash!=null){
+       found.hash=numericHash;
+       found.confidence.hash="medium";
+       found.parserMode=found.parserMode+" + numeric hashrate recovery";
+     }
+   }
    const map={pool:"ocrPool",electricity:"ocrElectricity",service:"ocrService",net:"ocrNet",discount:"ocrDiscount",hash:"ocrHash"};
    Object.entries(map).forEach(([key,id])=>{E(id).value=found[key]??"";setOCRConfidence(key,found.confidence[key]||"low")});
    E("ocrFile").dataset.rewardDate=found.rewardDate||"";
@@ -1003,6 +1074,7 @@ async function runOCR(){
    E("ocrPill").textContent=count===6?"Verified fields":count>=4?"Review values":"Needs review";
    E("ocrPill").className="pill "+(count===6?"live":count>=4?"cached":"manual");
    E("ocrApplyBtn").disabled=count===0;
+   E("usePreviousHashBtn").classList.toggle("hidden",found.hash!=null);
    updateOCRReconciliation();
    if(E("ocrAutoApply").checked&&allOCRValuesPresent()&&ocrReconciliationPasses()){
      applyOCRValues(true);
@@ -1021,6 +1093,19 @@ function updateOCRReconciliation(){
      :`<span class="bad">Check the values:</span> calculated net is ${btcFmt(calc)} BTC; difference ${(diff*100).toFixed(2)}%.`;
  }else E("ocrReconcile").textContent="Enter or detect all four BTC values to run the reconciliation check.";
 }
+
+function usePreviousHashrate(){
+ const current=N("hash");
+ if(current>0){
+   E("ocrHash").value=current;
+   setOCRConfidence("hash","medium");
+   E("ocrStatus").textContent=`Used the current saved hashrate of ${current.toFixed(2)} TH.`;
+   E("usePreviousHashBtn").classList.add("hidden");
+   updateOCRReconciliation();
+   E("ocrApplyBtn").disabled=false;
+ }
+}
+
 function applyOCRValues(auto=false){
  const pairs=[["ocrPool","pool"],["ocrElectricity","electricity"],["ocrService","service"],["ocrNet","net"],["ocrDiscount","discount"],["ocrHash","hash"]];
  let applied=0;
@@ -1045,7 +1130,7 @@ function clearOCR(){
  ["ocrPool","ocrElectricity","ocrService","ocrNet","ocrDiscount","ocrHash"].forEach(id=>E(id).value="");
  [["pool","boxOcrPool","confOcrPool"],["electricity","boxOcrElectricity","confOcrElectricity"],["service","boxOcrService","confOcrService"],["net","boxOcrNet","confOcrNet"],["discount","boxOcrDiscount","confOcrDiscount"],["hash","boxOcrHash","confOcrHash"]].forEach(x=>{E(x[1]).className="detected";E(x[2]).textContent=""});
  E("ocrRaw").value="";E("ocrProgress").style.width="0";E("ocrReadBtn").disabled=true;E("ocrApplyBtn").disabled=true;
- E("ocrStatus").textContent="No screenshot selected.";E("ocrMode").textContent="";E("ocrReconcile").textContent="";
+ E("ocrStatus").textContent="No screenshot selected.";E("ocrMode").textContent="";E("ocrReconcile").textContent="";E("usePreviousHashBtn").classList.add("hidden");
  E("ocrPill").textContent="Ready";E("ocrPill").className="pill";
 }
 
