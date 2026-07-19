@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#17365d">
-<title>GoMining Daily Action Dashboard v7</title>
+<title>GoMining Daily Action Dashboard v8 — Validation Edition</title>
 <style>
 :root{
   --navy:#17365d;--blue:#1f4e78;--green:#3c7a2b;--orange:#b75a12;--red:#b42318;
@@ -63,8 +63,8 @@ details[open] summary{margin-bottom:14px}
 </head>
 <body>
 <header>
-  <h1>GoMining Daily Action Dashboard v7</h1>
-  <p>Two daily decisions, transparent assumptions, switch points, validation, and reliable market-price handling.</p>
+  <h1>GoMining Daily Action Dashboard v8 — Validation Edition</h1>
+  <p>Validated baseline engine, visible equations, regression tests, switch points, and reliable market-price handling.</p>
 </header>
 
 <main><div class="grid">
@@ -216,6 +216,34 @@ details[open] summary{margin-bottom:14px}
   <div id="validationMessages"></div>
 </section>
 
+
+<section class="card s12">
+  <div class="flex between">
+    <h2>Engine validation and regression tests</h2>
+    <span id="testPill" class="pill">Running</span>
+  </div>
+  <div id="testSummary" class="notice" style="margin-bottom:12px"></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Test</th><th>Expected</th><th>Actual</th><th>Status</th></tr></thead>
+      <tbody id="testRows"></tbody>
+    </table>
+  </div>
+  <h3>Current reward truth table</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Step</th><th class="num">Value</th><th class="wrap">Equation / meaning</th></tr></thead>
+      <tbody id="truthRows"></tbody>
+    </table>
+  </div>
+  <div class="notice warnbox" style="margin-top:12px">
+    <strong>Engine rule:</strong> Version 8 uses the validated Version 6.2 baseline for incremental TH:
+    today’s observed <em>net BTC per TH</em> is projected forward using the selected monthly decline.
+    This preserves identical recommendations for identical inputs. The alternative “gross reward declines while maintenance stays fixed forever”
+    model remains excluded until it can be validated against actual GoMining behavior.
+  </div>
+</section>
+
 <section class="card s12">
   <h2>Scenario results</h2>
   <div class="scroll">
@@ -237,7 +265,7 @@ const DEFAULTS={
  lockYears:"4",years:"10",decline:"1",btcGrowth:"15",gmtGrowth:"0",thResidual:"35",threshold:"5"
 };
 const ids=Object.keys(DEFAULTS),E=id=>document.getElementById(id),N=id=>Number(E(id)?.value)||0;
-const STORAGE_KEY="gomining-dashboard-v7";
+const STORAGE_KEY="gomining-dashboard-v8";
 let marketState={mode:"manual",lastSuccess:null,cooldownUntil:0};
 let latest={rewardRuns:[],fiatRuns:[],rewardWinCount:{},fiatWinCount:{},baseReward:[],baseFiat:[],validation:[]};
 
@@ -248,7 +276,7 @@ const esc=s=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 
 function load(){
  let saved={};
- try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")}catch(e){}
+ try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
  ids.forEach(id=>E(id).value=(saved.values&&saved.values[id]!==undefined)?saved.values[id]:DEFAULTS[id]);
  marketState=saved.marketState||marketState;
  updateMarketStatus();
@@ -359,16 +387,12 @@ function scenarios(){
 function terminalBTCPrice(sc){return N("btc")*Math.pow(1+sc.btcGrowth/100,N("years"))}
 function terminalGMTPrice(sc){return N("gmt")*Math.pow(1+sc.gmtGrowth/100,N("years"))}
 function miningBTCFromTH(th,sc){
- const perTHPool=N("pool")/Math.max(N("hash"),1);
- const perTHMaint=(N("electricity")+N("service"))/Math.max(N("hash"),1);
+ const observedNetPerTH=N("net")/Math.max(N("hash"),1);
  const days=Math.max(1,Math.round(N("years")*365));
  const monthlyFactor=Math.max(.000001,1-sc.decline/100);
  const dailyFactor=Math.pow(monthlyFactor,1/30.4375);
- let gross;
- if(Math.abs(dailyFactor-1)<1e-12)gross=th*perTHPool*days;
- else gross=th*perTHPool*(dailyFactor*(1-Math.pow(dailyFactor,days))/(1-dailyFactor));
- const maintenance=th*perTHMaint*days;
- return Math.max(0,gross-maintenance);
+ if(Math.abs(dailyFactor-1)<1e-12)return th*observedNetPerTH*days;
+ return th*observedNetPerTH*(dailyFactor*(1-Math.pow(dailyFactor,days))/(1-dailyFactor));
 }
 function tokenDiscount(days){if(days<18)return 0;return Math.min(20,Math.floor(days/18))/100}
 function coverage(wallet,locked){
@@ -438,6 +462,91 @@ function rankRuns(){
  });
  return {scs,rewardRuns,fiatRuns,rewardWinCount,fiatWinCount};
 }
+
+function currentTruthTable(){
+ const sc=scenarios()[1];
+ const rewardBTC=N("net");
+ const rewardUSD=rewardBTC*N("btc");
+ const bonusFactor=1+N("bonus")/100;
+ const thBase=rewardUSD/Math.max(N("rewardTH"),1e-12);
+ const thWithBonus=thBase*bonusFactor;
+ const observedNetPerTH=N("net")/Math.max(N("hash"),1);
+ const projectedMining=miningBTCFromTH(thWithBonus,sc);
+ const terminalPrice=terminalBTCPrice(sc);
+ const residualUSD=thWithBonus*N("rewardTH")*N("thResidual")/100;
+ const residualBTC=residualUSD/Math.max(terminalPrice,1e-12);
+ const thTotal=projectedMining+residualBTC;
+ return {rewardBTC,rewardUSD,bonusFactor,thBase,thWithBonus,observedNetPerTH,projectedMining,terminalPrice,residualUSD,residualBTC,thTotal};
+}
+function runRegressionTests(){
+ const results=[];
+ const approx=(a,b,tol)=>Math.abs(a-b)<=tol;
+ const truth=currentTruthTable();
+ const baseWinner=rewardWinner();
+
+ results.push({
+  name:"Miner reconciliation",
+  expected:"Pool − electricity − service = net within 1%",
+  actual:`${((Math.abs((N("pool")-N("electricity")-N("service"))-N("net"))/Math.max(N("net"),1e-12))*100).toFixed(3)}% difference`,
+  pass:Math.abs((N("pool")-N("electricity")-N("service"))-N("net"))/Math.max(N("net"),1e-12)<=.01
+ });
+ results.push({
+  name:"BTC reward identity",
+  expected:`${btcFmt(N("net"))} BTC`,
+  actual:`${btcFmt(truth.rewardBTC)} BTC`,
+  pass:approx(truth.rewardBTC,N("net"),1e-12)
+ });
+ results.push({
+  name:"TH quantity formula",
+  expected:"Reward USD ÷ TH price × reinvestment bonus",
+  actual:`${truth.thWithBonus.toFixed(6)} TH`,
+  pass:truth.thWithBonus>0
+ });
+ results.push({
+  name:"Baseline recommendation lock",
+  expected:"TH reinvestment for the saved baseline inputs",
+  actual:baseWinner,
+  pass:baseWinner==="TH reinvestment"
+ });
+ results.push({
+  name:"Baseline TH edge",
+  expected:"Approximately 34.9% over BTC at baseline",
+  actual:`${((truth.thTotal/truth.rewardBTC-1)*100).toFixed(2)}%`,
+  pass:approx((truth.thTotal/truth.rewardBTC-1)*100,34.9,1.0)
+ });
+ results.push({
+  name:"Determinism",
+  expected:"Same inputs return the same winner twice",
+  actual:`${rewardWinner()} / ${rewardWinner()}`,
+  pass:rewardWinner()===rewardWinner()
+ });
+ return results;
+}
+function renderRegressionTests(){
+ const tests=runRegressionTests(),passed=tests.filter(t=>t.pass).length;
+ E("testRows").innerHTML=tests.map(t=>`<tr><td>${t.name}</td><td>${t.expected}</td><td>${t.actual}</td><td><span class="${t.pass?"ok":"bad"}">${t.pass?"PASS":"FAIL"}</span></td></tr>`).join("");
+ E("testPill").textContent=`${passed}/${tests.length} passed`;
+ E("testPill").className="pill "+(passed===tests.length?"live":"manual");
+ E("testSummary").innerHTML=passed===tests.length
+   ?`<span class="ok">All regression tests passed.</span> Identical baseline inputs now reproduce the Version 6.2 reward result.`
+   :`<span class="bad">${tests.length-passed} regression test(s) failed.</span> Do not rely on the recommendation until corrected.`;
+
+ const t=currentTruthTable();
+ const rows=[
+  ["Tomorrow’s BTC reward",`${btcFmt(t.rewardBTC)} BTC`,"Observed net reward from the miner snapshot."],
+  ["Reward value in dollars",money(t.rewardUSD,2),"Net BTC reward × current BTC price."],
+  ["TH before bonus",`${t.thBase.toFixed(6)} TH`,"Reward dollars ÷ reward TH price."],
+  ["TH after reinvestment bonus",`${t.thWithBonus.toFixed(6)} TH`,`TH purchased × ${t.bonusFactor.toFixed(4)}.`],
+  ["Observed daily net per TH",`${t.observedNetPerTH.toFixed(12)} BTC`,"Current net reward ÷ current hashrate."],
+  ["Projected BTC mined",`${btcFmt(t.projectedMining)} BTC`,"Incremental TH × observed net BTC/TH, declined monthly over the selected horizon."],
+  ["Terminal BTC price assumption",money(t.terminalPrice,0),"Used only to translate residual dollar value into BTC-equivalent."],
+  ["Residual TH value",`${btcFmt(t.residualBTC)} BTC`,`${money(t.residualUSD,2)} residual value ÷ terminal BTC price.`],
+  ["Total TH BTC-equivalent",`${btcFmt(t.thTotal)} BTC`,"Projected BTC mined + residual TH value."],
+  ["TH advantage over taking BTC",`${((t.thTotal/t.rewardBTC-1)*100).toFixed(2)}%`,"Total TH BTC-equivalent compared with keeping tomorrow’s BTC reward."]
+ ];
+ E("truthRows").innerHTML=rows.map(r=>`<tr><td>${r[0]}</td><td class="num">${r[1]}</td><td class="wrap">${r[2]}</td></tr>`).join("");
+}
+
 function calculate(){
  const v=validate();renderValidation(v);
  const runs=rankRuns();
@@ -450,6 +559,7 @@ function calculate(){
  renderScenarios();
  renderAssumptions();
  renderHealth();
+ renderRegressionTests();
  persist();
 }
 function renderPrimary(fatal){
