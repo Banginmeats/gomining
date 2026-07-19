@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#17365d">
-<title>GoMining Daily Action Dashboard v9.5 — Dedicated TH OCR</title>
+<title>GoMining Daily Action Dashboard v9.6 — Anchor-Based TH OCR</title>
 <style>
 :root{
   --navy:#17365d;--blue:#1f4e78;--green:#3c7a2b;--orange:#b75a12;--red:#b42318;
@@ -83,8 +83,8 @@ details[open] summary{margin-bottom:14px}
 </head>
 <body>
 <header>
-  <h1>GoMining Daily Action Dashboard v9.5 — Dedicated TH OCR</h1>
-  <p>GoMining screenshot import with a dedicated digits-only OCR routine for the Computing Power value.</p>
+  <h1>GoMining Daily Action Dashboard v9.6 — Anchor-Based TH OCR</h1>
+  <p>GoMining screenshot import with anchor-based TH extraction that locates the Computing Power row before reading its value.</p>
 </header>
 
 <main><div class="grid">
@@ -348,7 +348,7 @@ const DEFAULTS={
  lockYears:"4",years:"10",decline:"1",btcGrowth:"15",gmtGrowth:"0",thResidual:"35",threshold:"5"
 };
 const ids=Object.keys(DEFAULTS),E=id=>document.getElementById(id),N=id=>Number(E(id)?.value)||0;
-const STORAGE_KEY="gomining-dashboard-v9-5";
+const STORAGE_KEY="gomining-dashboard-v9-6";
 let marketState={mode:"manual",lastSuccess:null,cooldownUntil:0};
 let latest={rewardRuns:[],fiatRuns:[],rewardWinCount:{},fiatWinCount:{},baseReward:[],baseFiat:[],validation:[]};
 
@@ -359,7 +359,7 @@ const esc=s=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 
 function load(){
  let saved={};
- try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v9-4")||localStorage.getItem("gomining-dashboard-v9-3")||localStorage.getItem("gomining-dashboard-v9-2")||localStorage.getItem("gomining-dashboard-v9-1")||localStorage.getItem("gomining-dashboard-v9")||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
+ try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v9-5")||localStorage.getItem("gomining-dashboard-v9-4")||localStorage.getItem("gomining-dashboard-v9-3")||localStorage.getItem("gomining-dashboard-v9-2")||localStorage.getItem("gomining-dashboard-v9-1")||localStorage.getItem("gomining-dashboard-v9")||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
  ids.forEach(id=>E(id).value=(saved.values&&saved.values[id]!==undefined)?saved.values[id]:DEFAULTS[id]);
  marketState=saved.marketState||marketState;
  updateMarketStatus();
@@ -838,16 +838,40 @@ async function preprocessTopPanel(dataUrl){
  });
 }
 
-async function preprocessHashValueCrop(dataUrl){
+async function cropHashValueFromAnchor(processedDataUrl,words){
  return new Promise((resolve,reject)=>{
    const img=new Image();
    img.onload=()=>{
-     // Tight crop around the right-side Computing power value.
-     const cropX=Math.round(img.width*0.56);
-     const cropY=Math.round(img.height*0.235);
-     const cropW=Math.round(img.width*0.34);
-     const cropH=Math.round(img.height*0.060);
-     const scale=Math.max(5,1800/cropW);
+     const normalized=(words||[]).map(w=>({
+       text:String(w.text||"").toLowerCase().replace(/[^a-z]/g,""),
+       bbox:w.bbox
+     })).filter(w=>w.text&&w.bbox);
+
+     // Find the Computing power label, tolerating OCR errors.
+     const isComputing=t=>t.startsWith("comput")||t==="comouting"||t==="cornputing";
+     const isPower=t=>t.startsWith("pow")||t==="p0wer";
+     let anchors=[];
+     for(let i=0;i<normalized.length;i++){
+       if(isComputing(normalized[i].text)){
+         const next=normalized.slice(i+1,i+5).find(w=>isPower(w.text));
+         const boxes=[normalized[i].bbox];
+         if(next)boxes.push(next.bbox);
+         anchors.push({
+           x0:Math.min(...boxes.map(b=>b.x0)), y0:Math.min(...boxes.map(b=>b.y0)),
+           x1:Math.max(...boxes.map(b=>b.x1)), y1:Math.max(...boxes.map(b=>b.y1))
+         });
+       }
+     }
+     if(!anchors.length){resolve(null);return}
+
+     const a=anchors[0];
+     const rowCenter=(a.y0+a.y1)/2;
+     const rowHeight=Math.max(24,(a.y1-a.y0)*2.4);
+     const cropX=Math.round(img.width*0.52);
+     const cropY=Math.max(0,Math.round(rowCenter-rowHeight/2));
+     const cropW=Math.max(1,img.width-cropX-Math.round(img.width*.04));
+     const cropH=Math.min(img.height-cropY,Math.round(rowHeight));
+     const scale=Math.max(4,1600/cropW);
 
      const canvas=document.createElement("canvas");
      canvas.width=Math.round(cropW*scale);
@@ -855,18 +879,17 @@ async function preprocessHashValueCrop(dataUrl){
      const ctx=canvas.getContext("2d",{willReadFrequently:true});
      ctx.drawImage(img,cropX,cropY,cropW,cropH,0,0,canvas.width,canvas.height);
 
-     // Convert to high-contrast grayscale but preserve the decimal point.
      const im=ctx.getImageData(0,0,canvas.width,canvas.height),d=im.data;
      for(let i=0;i<d.length;i+=4){
        const gray=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-       const contrast=Math.max(0,Math.min(255,(gray-128)*2.4+128));
-       const v=contrast>195?255:contrast<52?0:contrast;
+       const contrast=Math.max(0,Math.min(255,(gray-128)*2.2+128));
+       const v=contrast>190?255:contrast<48?0:contrast;
        d[i]=d[i+1]=d[i+2]=v;
      }
      ctx.putImageData(im,0,0);
      resolve(canvas.toDataURL("image/png"));
    };
-   img.onerror=reject;img.src=dataUrl;
+   img.onerror=reject;img.src=processedDataUrl;
  });
 }
 
@@ -1164,34 +1187,41 @@ async function runOCR(){
      }
    }
 
-   // Final dedicated OCR pass reads only the Computing power value using digits-only mode.
+   // Final TH pass: locate the Computing power label in OCR geometry,
+   // crop the value on the same row, then read only digits and punctuation.
    if(found.hash==null || Number.isInteger(found.hash)){
-     E("ocrStatus").textContent="Reading TH value in digits-only mode…";
-     const hashCrop=await preprocessHashValueCrop(ocrImageData);
+     E("ocrStatus").textContent="Locating Computing power row…";
+     const hashCrop=await cropHashValueFromAnchor(prepared.dataUrl,fullResult.data.words||[]);
+     if(hashCrop){
+       await ocrWorker.setParameters({
+         tessedit_char_whitelist:"0123456789,.",
+         preserve_interword_spaces:"1",
+         tessedit_pageseg_mode:"7"
+       });
+       const hashResult=await ocrWorker.recognize(hashCrop);
+       await ocrWorker.setParameters({
+         tessedit_char_whitelist:"",
+         preserve_interword_spaces:"0",
+         tessedit_pageseg_mode:"3"
+       });
 
-     // Temporarily constrain Tesseract to numbers and separators.
-     await ocrWorker.setParameters({
-       tessedit_char_whitelist:"0123456789,.",
-       preserve_interword_spaces:"1",
-       tessedit_pageseg_mode:"7"
-     });
-     const hashResult=await ocrWorker.recognize(hashCrop);
-
-     // Restore normal OCR behavior for later scans.
-     await ocrWorker.setParameters({
-       tessedit_char_whitelist:"",
-       preserve_interword_spaces:"0",
-       tessedit_pageseg_mode:"3"
-     });
-
-     const current=N("hash")||1000;
-     const dedicated=normalizeDedicatedTH(hashResult.data.text||"",current);
-     if(dedicated!=null){
-       const isPrecise=Math.abs(dedicated-Math.round(dedicated))>.0001;
-       found.hash=dedicated;
-       found.confidence.hash=isPrecise?"high":"medium";
-       found.parserMode=found.parserMode+" + dedicated digits-only TH OCR";
-       E("ocrRaw").value += "\n--- DEDICATED TH OCR ---\n"+(hashResult.data.text||"");
+       const current=N("hash")||1000;
+       const dedicated=normalizeDedicatedTH(hashResult.data.text||"",current);
+       if(dedicated!=null){
+         const delta=Math.abs(dedicated-current)/Math.max(current,1);
+         // A daily GoMining snapshot should not change hashrate by more than 15%.
+         // Reject impossible OCR results such as 630.202 when the saved value is near 1,000 TH.
+         if(delta<=.15){
+           found.hash=dedicated;
+           found.confidence.hash=Math.abs(dedicated-Math.round(dedicated))>.0001?"high":"medium";
+           found.parserMode=found.parserMode+" + anchor-based TH OCR";
+         }else{
+           found.hash=null;
+           found.confidence.hash="low";
+           found.parserMode=found.parserMode+" + rejected implausible TH result";
+         }
+         E("ocrRaw").value += "\n--- ANCHOR-BASED TH OCR ---\n"+(hashResult.data.text||"");
+       }
      }
    }
    const map={pool:"ocrPool",electricity:"ocrElectricity",service:"ocrService",net:"ocrNet",discount:"ocrDiscount",hash:"ocrHash"};
@@ -1200,7 +1230,13 @@ async function runOCR(){
    if(found.hash!=null){
      const current=N("hash")||found.hash;
      const delta=Math.abs(found.hash-current)/Math.max(current,1);
-     if(delta>.10)found.confidence.hash="medium";
+     if(delta>.15){
+       found.hash=null;
+       found.confidence.hash="low";
+       found.parserMode=found.parserMode+" + implausible TH rejected";
+     }else if(delta>.05){
+       found.confidence.hash="medium";
+     }
    }
    const count=Object.keys(map).filter(k=>found[k]!=null).length;
    E("ocrStatus").textContent=`OCR complete. Detected ${count} of 6 target values${found.rewardDate?` for ${found.rewardDate}`:""}.`;
