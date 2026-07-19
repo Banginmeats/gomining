@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#17365d">
-<title>GoMining Daily Action Dashboard v9.6 — Anchor-Based TH OCR</title>
+<title>GoMining Daily Action Dashboard v9.4.1 — Stable TH</title>
 <style>
 :root{
   --navy:#17365d;--blue:#1f4e78;--green:#3c7a2b;--orange:#b75a12;--red:#b42318;
@@ -83,8 +83,8 @@ details[open] summary{margin-bottom:14px}
 </head>
 <body>
 <header>
-  <h1>GoMining Daily Action Dashboard v9.6 — Anchor-Based TH OCR</h1>
-  <p>GoMining screenshot import with anchor-based TH extraction that locates the Computing Power row before reading its value.</p>
+  <h1>GoMining Daily Action Dashboard v9.4.1 — Stable TH</h1>
+  <p>Stable GoMining screenshot import that preserves the reliable whole-number TH result and requires review when the decimal is not visible to OCR.</p>
 </header>
 
 <main><div class="grid">
@@ -159,7 +159,7 @@ details[open] summary{margin-bottom:14px}
         <div id="boxOcrService" class="detected"><label>Service (BTC/day)</label><input id="ocrService" type="number" step=".00000001"><div id="confOcrService" class="conf-label"></div></div>
         <div id="boxOcrNet" class="detected"><label>Net reward (BTC/day)</label><input id="ocrNet" type="number" step=".00000001"><div id="confOcrNet" class="conf-label"></div></div>
         <div id="boxOcrDiscount" class="detected"><label>Discount (%)</label><input id="ocrDiscount" type="number" step=".01"><div id="confOcrDiscount" class="conf-label"></div></div>
-        <div id="boxOcrHash" class="detected"><label>Hashrate (TH)</label><input id="ocrHash" type="number" step=".01"><div id="confOcrHash" class="conf-label"></div></div>
+        <div id="boxOcrHash" class="detected"><label>Hashrate (TH)</label><input id="ocrHash" type="number" step=".01"><div id="confOcrHash" class="conf-label"></div><div class="muted">If OCR returns only the whole number, enter the visible decimal from the screenshot before applying.</div></div>
       </div>
       <div id="ocrReconcile" class="why"></div>
       <div class="btnrow" style="margin-top:12px">
@@ -348,7 +348,7 @@ const DEFAULTS={
  lockYears:"4",years:"10",decline:"1",btcGrowth:"15",gmtGrowth:"0",thResidual:"35",threshold:"5"
 };
 const ids=Object.keys(DEFAULTS),E=id=>document.getElementById(id),N=id=>Number(E(id)?.value)||0;
-const STORAGE_KEY="gomining-dashboard-v9-6";
+const STORAGE_KEY="gomining-dashboard-v9-4-1";
 let marketState={mode:"manual",lastSuccess:null,cooldownUntil:0};
 let latest={rewardRuns:[],fiatRuns:[],rewardWinCount:{},fiatWinCount:{},baseReward:[],baseFiat:[],validation:[]};
 
@@ -359,7 +359,7 @@ const esc=s=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 
 function load(){
  let saved={};
- try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v9-5")||localStorage.getItem("gomining-dashboard-v9-4")||localStorage.getItem("gomining-dashboard-v9-3")||localStorage.getItem("gomining-dashboard-v9-2")||localStorage.getItem("gomining-dashboard-v9-1")||localStorage.getItem("gomining-dashboard-v9")||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
+ try{saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem("gomining-dashboard-v9-4")||localStorage.getItem("gomining-dashboard-v9-3")||localStorage.getItem("gomining-dashboard-v9-2")||localStorage.getItem("gomining-dashboard-v9-1")||localStorage.getItem("gomining-dashboard-v9")||localStorage.getItem("gomining-dashboard-v8")||localStorage.getItem("gomining-dashboard-v7")||"{}")}catch(e){}
  ids.forEach(id=>E(id).value=(saved.values&&saved.values[id]!==undefined)?saved.values[id]:DEFAULTS[id]);
  marketState=saved.marketState||marketState;
  updateMarketStatus();
@@ -838,107 +838,33 @@ async function preprocessTopPanel(dataUrl){
  });
 }
 
-async function cropHashValueFromAnchor(processedDataUrl,words){
+async function preprocessHashValueCrop(dataUrl){
  return new Promise((resolve,reject)=>{
    const img=new Image();
    img.onload=()=>{
-     const normalized=(words||[]).map(w=>({
-       text:String(w.text||"").toLowerCase().replace(/[^a-z]/g,""),
-       bbox:w.bbox
-     })).filter(w=>w.text&&w.bbox);
-
-     // Find the Computing power label, tolerating OCR errors.
-     const isComputing=t=>t.startsWith("comput")||t==="comouting"||t==="cornputing";
-     const isPower=t=>t.startsWith("pow")||t==="p0wer";
-     let anchors=[];
-     for(let i=0;i<normalized.length;i++){
-       if(isComputing(normalized[i].text)){
-         const next=normalized.slice(i+1,i+5).find(w=>isPower(w.text));
-         const boxes=[normalized[i].bbox];
-         if(next)boxes.push(next.bbox);
-         anchors.push({
-           x0:Math.min(...boxes.map(b=>b.x0)), y0:Math.min(...boxes.map(b=>b.y0)),
-           x1:Math.max(...boxes.map(b=>b.x1)), y1:Math.max(...boxes.map(b=>b.y1))
-         });
-       }
-     }
-     if(!anchors.length){resolve(null);return}
-
-     const a=anchors[0];
-     const rowCenter=(a.y0+a.y1)/2;
-     const rowHeight=Math.max(24,(a.y1-a.y0)*2.4);
-     const cropX=Math.round(img.width*0.52);
-     const cropY=Math.max(0,Math.round(rowCenter-rowHeight/2));
-     const cropW=Math.max(1,img.width-cropX-Math.round(img.width*.04));
-     const cropH=Math.min(img.height-cropY,Math.round(rowHeight));
-     const scale=Math.max(4,1600/cropW);
-
+     // Fixed GoMining layout: right side of the Computing power row.
+     const cropX=Math.round(img.width*0.48);
+     const cropY=Math.round(img.height*0.235);
+     const cropW=Math.round(img.width*0.43);
+     const cropH=Math.round(img.height*0.075);
+     const scale=Math.max(2.5,1400/cropW);
      const canvas=document.createElement("canvas");
      canvas.width=Math.round(cropW*scale);
      canvas.height=Math.round(cropH*scale);
      const ctx=canvas.getContext("2d",{willReadFrequently:true});
      ctx.drawImage(img,cropX,cropY,cropW,cropH,0,0,canvas.width,canvas.height);
-
      const im=ctx.getImageData(0,0,canvas.width,canvas.height),d=im.data;
      for(let i=0;i<d.length;i+=4){
        const gray=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-       const contrast=Math.max(0,Math.min(255,(gray-128)*2.2+128));
-       const v=contrast>190?255:contrast<48?0:contrast;
+       const v=gray>165?255:0;
        d[i]=d[i+1]=d[i+2]=v;
      }
      ctx.putImageData(im,0,0);
      resolve(canvas.toDataURL("image/png"));
    };
-   img.onerror=reject;img.src=processedDataUrl;
+   img.onerror=reject;img.src=dataUrl;
  });
 }
-
-function normalizeDedicatedTH(raw,currentHash){
- let s=String(raw||"").trim().replace(/\s+/g,"").replace(/[^0-9.,]/g,"");
- if(!s)return null;
-
- // Standard forms.
- if(s.includes(",")&&s.includes("."))s=s.replace(/,/g,"");
- else if(s.includes(",")&&!s.includes(".")){
-   // A comma may be a thousands separator or decimal separator.
-   const parts=s.split(",");
-   if(parts.length===2&&parts[1].length===2)s=parts[0]+"."+parts[1];
-   else s=s.replace(/,/g,"");
- }
-
- let n=Number(s);
- const current=currentHash||1000;
-
- // Recover missing decimal: 101562 -> 1015.62, 10156 -> 1015.6.
- if(Number.isFinite(n)&&n>50000){
-   const candidates=[n/10,n/100,n/1000].filter(x=>x>=100&&x<=50000);
-   if(candidates.length){
-     candidates.sort((a,b)=>Math.abs(a-current)-Math.abs(b-current));
-     n=candidates[0];
-   }
- }
-
- // Recover split OCR such as "1015 62" already compacted to 101562.
- if(Number.isFinite(n)&&Number.isInteger(n)&&n>=1000&&n<=50000){
-   const rawDigits=s.replace(/[.,]/g,"");
-   if(rawDigits.length>=5){
-     const candidates=[];
-     for(const places of [1,2,3]){
-       const val=Number(rawDigits.slice(0,-places)+"."+rawDigits.slice(-places));
-       if(val>=100&&val<=50000)candidates.push(val);
-     }
-     if(candidates.length){
-       candidates.sort((a,b)=>Math.abs(a-current)-Math.abs(b-current));
-       const best=candidates[0];
-       if(Math.abs(best-current)<Math.abs(n-current))n=best;
-     }
-   }
- }
-
- if(!Number.isFinite(n)||n<100||n>50000)return null;
- return Math.round(n*10000)/10000;
-}
-
 function findHashrateByNumericRange(text){
  const lines=text.split(/\n+/).map(x=>x.trim()).filter(Boolean);
 
@@ -1128,7 +1054,8 @@ function setOCRConfidence(field,level){
  E(conf).textContent=level==="high"?"High confidence":level==="medium"?"Review value":"Not detected";
 }
 function allOCRValuesPresent(){
- return ["ocrPool","ocrElectricity","ocrService","ocrNet","ocrDiscount","ocrHash"].every(id=>E(id).value!=="");
+ return ["ocrPool","ocrElectricity","ocrService","ocrNet","ocrDiscount","ocrHash"].every(id=>E(id).value!=="")
+   && !Number.isInteger(Number(E("ocrHash").value));
 }
 function ocrReconciliationPasses(){
  const p=Number(E("ocrPool").value),el=Number(E("ocrElectricity").value),s=Number(E("ocrService").value),n=Number(E("ocrNet").value);
@@ -1187,62 +1114,36 @@ async function runOCR(){
      }
    }
 
-   // Final TH pass: locate the Computing power label in OCR geometry,
-   // crop the value on the same row, then read only digits and punctuation.
-   if(found.hash==null || Number.isInteger(found.hash)){
-     E("ocrStatus").textContent="Locating Computing power row…";
-     const hashCrop=await cropHashValueFromAnchor(prepared.dataUrl,fullResult.data.words||[]);
-     if(hashCrop){
-       await ocrWorker.setParameters({
-         tessedit_char_whitelist:"0123456789,.",
-         preserve_interword_spaces:"1",
-         tessedit_pageseg_mode:"7"
-       });
-       const hashResult=await ocrWorker.recognize(hashCrop);
-       await ocrWorker.setParameters({
-         tessedit_char_whitelist:"",
-         preserve_interword_spaces:"0",
-         tessedit_pageseg_mode:"3"
-       });
-
+   // Last dedicated OCR pass reads only the value location on the Computing power row.
+   if(found.hash==null){
+     E("ocrStatus").textContent="Reading TH value directly…";
+     const hashCrop=await preprocessHashValueCrop(ocrImageData);
+     const hashResult=await ocrWorker.recognize(hashCrop);
+     const directCandidates=numberCandidates(hashResult.data.text||"")
+       .filter(n=>n>=100&&n<=50000);
+     if(directCandidates.length){
        const current=N("hash")||1000;
-       const dedicated=normalizeDedicatedTH(hashResult.data.text||"",current);
-       if(dedicated!=null){
-         const delta=Math.abs(dedicated-current)/Math.max(current,1);
-         // A daily GoMining snapshot should not change hashrate by more than 15%.
-         // Reject impossible OCR results such as 630.202 when the saved value is near 1,000 TH.
-         if(delta<=.15){
-           found.hash=dedicated;
-           found.confidence.hash=Math.abs(dedicated-Math.round(dedicated))>.0001?"high":"medium";
-           found.parserMode=found.parserMode+" + anchor-based TH OCR";
-         }else{
-           found.hash=null;
-           found.confidence.hash="low";
-           found.parserMode=found.parserMode+" + rejected implausible TH result";
-         }
-         E("ocrRaw").value += "\n--- ANCHOR-BASED TH OCR ---\n"+(hashResult.data.text||"");
-       }
+       directCandidates.sort((a,b)=>Math.abs(a-current)-Math.abs(b-current));
+       found.hash=directCandidates[0];
+       found.confidence.hash="medium";
+       found.parserMode=found.parserMode+" + direct TH value crop";
+       E("ocrRaw").value += "\n--- TH VALUE CROP ---\n"+(hashResult.data.text||"");
      }
+   }
+   if(found.hash!=null && Number.isInteger(Number(found.hash))){
+     found.confidence.hash="medium";
    }
    const map={pool:"ocrPool",electricity:"ocrElectricity",service:"ocrService",net:"ocrNet",discount:"ocrDiscount",hash:"ocrHash"};
    Object.entries(map).forEach(([key,id])=>{E(id).value=found[key]??"";setOCRConfidence(key,found.confidence[key]||"low")});
    E("ocrFile").dataset.rewardDate=found.rewardDate||"";
-   if(found.hash!=null){
-     const current=N("hash")||found.hash;
-     const delta=Math.abs(found.hash-current)/Math.max(current,1);
-     if(delta>.15){
-       found.hash=null;
-       found.confidence.hash="low";
-       found.parserMode=found.parserMode+" + implausible TH rejected";
-     }else if(delta>.05){
-       found.confidence.hash="medium";
-     }
-   }
    const count=Object.keys(map).filter(k=>found[k]!=null).length;
-   E("ocrStatus").textContent=`OCR complete. Detected ${count} of 6 target values${found.rewardDate?` for ${found.rewardDate}`:""}.`;
+   const wholeTH=found.hash!=null && Number.isInteger(Number(found.hash));
+   E("ocrStatus").textContent=wholeTH
+     ? `OCR complete. TH whole number detected${found.rewardDate?` for ${found.rewardDate}`:""}; confirm the decimal before applying.`
+     : `OCR complete. Detected ${count} of 6 target values${found.rewardDate?` for ${found.rewardDate}`:""}.`;
    E("ocrMode").textContent=`Parser: ${found.parserMode}. Reward panel automatically cropped before OCR.`;
-   E("ocrPill").textContent=count===6?"Verified fields":count>=4?"Review values":"Needs review";
-   E("ocrPill").className="pill "+(count===6?"live":count>=4?"cached":"manual");
+   E("ocrPill").textContent=wholeTH?"Confirm TH decimal":count===6?"Verified fields":count>=4?"Review values":"Needs review";
+   E("ocrPill").className="pill "+(wholeTH?"cached":count===6?"live":count>=4?"cached":"manual");
    E("ocrApplyBtn").disabled=count===0;
    E("usePreviousHashBtn").classList.toggle("hidden",found.hash!=null);
    updateOCRReconciliation();
